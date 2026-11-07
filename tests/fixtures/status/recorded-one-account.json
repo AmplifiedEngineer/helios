@@ -1,0 +1,1 @@
+{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"igorjs","tokenSource":"keyring","scopes":"admin:org, admin:public_key, admin:ssh_signing_key, delete_repo, gist, project, repo, workflow","gitProtocol":"https"}]}}

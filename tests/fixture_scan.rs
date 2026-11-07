@@ -300,14 +300,15 @@ fn scan_flags_a_real_looking_credential_after_an_auth_scheme() {
 fn real_fixtures_hold_no_credentials() {
     // Arrange
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    if !dir.is_dir() {
-        // No recordings yet, so nothing can leak.
-        return;
-    }
 
     // Act
     let findings = scan(&dir);
 
     // Assert
+    assert!(dir.is_dir(), "tests/fixtures is missing");
+    assert!(
+        fs::read_dir(&dir).expect("read fixtures").next().is_some(),
+        "tests/fixtures is empty"
+    );
     assert!(findings.is_empty(), "credentials in fixtures: {findings:?}");
 }
