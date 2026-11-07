@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Lock Closed Issues & PRs
+
+on:
+  schedule:
+    - cron: "0 10 1 * *"  # 1st of each month at 10am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lock:
+    name: lock
+    runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 6
+    permissions:
+      issues: write # locks closed issues
+      pull-requests: write # locks closed pull requests
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+      - uses: dessant/lock-threads@89ae32b08ed1a541efecbab17912962a5e38981c # v6.0.2
+        with:
+          issue-inactive-days: 90
+          pr-inactive-days: 30
+          issue-lock-reason: "resolved"
+          pr-lock-reason: "resolved"
+          issue-comment: >
+            This issue has been locked because it has been closed for more than 90 days
+            with no further activity. Please open a new issue if the problem persists.
+          pr-comment: >
+            This PR has been locked because it has been closed for more than 30 days
+            with no further activity. Please open a new PR if you'd like to continue this work.

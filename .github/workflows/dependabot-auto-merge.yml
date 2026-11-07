@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Dependabot Auto-Merge
+
+on: pull_request
+
+# GITHUB_TOKEN stays read-only: the App token minted below does the
+# approve + auto-merge writes. GITHUB_TOKEN approvals additionally
+# require the repo-level "Allow GitHub Actions to create and approve
+# pull requests" setting (off by default), which silently broke this
+# workflow elsewhere. An igorjs[bot]
+# approval avoids the setting entirely, satisfies required-review
+# rules, and leaves a clearer audit trail than github-actions[bot].
+permissions:
+  contents: read
+
+concurrency:
+  # The sender is in the key so a branch update by another actor cannot cancel
+  # a Dependabot run that is still approving.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.sender.login }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  auto-merge:
+    name: auto-merge
+    # Holds the GitHub App credentials. Protection rules for them live on this environment.
+    environment: dependabot
+    runs-on: ubuntu-latest
+    # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read # fetch-metadata reads the pull request
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.sender.login == 'dependabot[bot]'
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mint App installation token
+        id: app_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Auto-approve patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+
+      - name: Enable auto-merge for patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
