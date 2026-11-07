@@ -1,0 +1,90 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 59,
+      "pageInfo": {
+        "hasNextPage": true,
+        "endCursor": "Y3Vyc29yOjM="
+      },
+      "nodes": [
+        {
+          "number": 14964,
+          "title": "chore(deps): Bump the codeql-actions group with 3 updates",
+          "isDraft": false,
+          "updatedAt": "2026-11-07T23:18:39Z",
+          "author": {
+            "login": "dependabot"
+          },
+          "repository": {
+            "nameWithOwner": "cli/cli"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 14963,
+          "title": "chore(deps): Bump github.com/spf13/pflag from 1.0.10 to 1.1.0",
+          "isDraft": false,
+          "updatedAt": "2026-11-07T22:52:49Z",
+          "author": {
+            "login": "dependabot"
+          },
+          "repository": {
+            "nameWithOwner": "cli/cli"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 14927,
+          "title": "Add guided multi-account setup and evaluation",
+          "isDraft": true,
+          "updatedAt": "2026-11-03T21:29:03Z",
+          "author": {
+            "login": "williammartin"
+          },
+          "repository": {
+            "nameWithOwner": "cli/cli"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "FAILURE"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "rateLimit": {
+      "remaining": 4756,
+      "resetAt": "2026-11-07T23:38:28Z",
+      "cost": 1
+    }
+  }
+}

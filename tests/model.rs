@@ -133,6 +133,8 @@ fn a_pr_summary_title_is_remote() {
         key: key("github.com", "octo", "org/repo", 7),
         title: sanitize("Fix the thing"),
         author: sanitize("octocat"),
+        is_draft: false,
+        updated_at: chrono::DateTime::UNIX_EPOCH,
         tags: vec![Tag::Review],
         review_decision: None,
         check_state: None,

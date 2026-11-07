@@ -1,0 +1,42 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 1,
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      },
+      "nodes": [
+        {
+          "number": 30,
+          "title": "Plain \u001b[31mred\u001b[0m title\u001b]0;pwned\u0007",
+          "isDraft": false,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": {
+            "login": "evil\u001b[2Juser"
+          },
+          "repository": {
+            "nameWithOwner": "octo/widgets"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "rateLimit": {
+      "remaining": 4000,
+      "resetAt": "2026-11-05T12:00:00Z",
+      "cost": 1
+    }
+  }
+}

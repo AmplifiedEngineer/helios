@@ -2,6 +2,8 @@
 
 //! The pull request model shared by the fetch and render layers.
 
+use chrono::{DateTime, Utc};
+
 use crate::remote::Remote;
 use crate::sanitize::sanitize;
 
@@ -73,6 +75,8 @@ pub struct PrSummary {
     pub key: PrKey,
     pub title: Remote,
     pub author: Remote,
+    pub is_draft: bool,
+    pub updated_at: DateTime<Utc>,
     pub tags: Vec<Tag>,
     pub review_decision: Option<ReviewDecision>,
     pub check_state: Option<CheckState>,

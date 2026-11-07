@@ -1,0 +1,134 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 5,
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      },
+      "nodes": [
+        {
+          "number": 10,
+          "title": "Shared change",
+          "isDraft": false,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": {
+            "login": "octocat"
+          },
+          "repository": {
+            "nameWithOwner": "octo/widgets"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 20,
+          "title": "Assigned only",
+          "isDraft": false,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": {
+            "login": "hubot"
+          },
+          "repository": {
+            "nameWithOwner": "octo/widgets"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 21,
+          "title": "Draft work",
+          "isDraft": true,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": {
+            "login": "octocat"
+          },
+          "repository": {
+            "nameWithOwner": "octo/widgets"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 22,
+          "title": "No checks yet",
+          "isDraft": false,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": {
+            "login": "octocat"
+          },
+          "repository": {
+            "nameWithOwner": "octo/widgets"
+          },
+          "reviewDecision": "REVIEW_REQUIRED",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": null
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 23,
+          "title": "Ghost PR",
+          "isDraft": false,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": null,
+          "repository": {
+            "nameWithOwner": "octo/widgets"
+          },
+          "reviewDecision": null,
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "SUCCESS"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "rateLimit": {
+      "remaining": 4000,
+      "resetAt": "2026-11-05T12:00:00Z",
+      "cost": 1
+    }
+  }
+}
