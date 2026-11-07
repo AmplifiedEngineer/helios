@@ -3,11 +3,14 @@
 use forgebird::accounts::{list, parse_accounts, Account, AccountState, AccountsError};
 use forgebird::proc::{self, ProcError};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+
+#[path = "support/fake_gh.rs"]
+mod fake_gh;
+use fake_gh::{FakeGh, NEXT_DIR};
 
 /// Short on purpose: the blocking gh test waits this long before the kill.
 const BLOCKING_TIMEOUT: Duration = Duration::from_millis(200);
@@ -15,48 +18,6 @@ const BLOCKING_TIMEOUT: Duration = Duration::from_millis(200);
 const TIMEOUT: Duration = Duration::from_secs(5);
 /// Room for process start and teardown on a loaded machine.
 const TIMEOUT_SLACK: Duration = Duration::from_millis(1500);
-
-static NEXT_DIR: AtomicU32 = AtomicU32::new(0);
-
-/// A fake `gh`: a shell script in a unique temp dir, removed on drop.
-struct FakeGh {
-    dir: PathBuf,
-    path: PathBuf,
-}
-
-impl FakeGh {
-    fn new(script: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "forgebird-fake-gh-{}-{}",
-            std::process::id(),
-            NEXT_DIR.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).expect("create fake gh dir");
-        let path = dir.join("gh");
-        fs::write(
-            &path,
-            format!("#!/bin/sh\n[ \"$1\" = warm-up ] && exit 0\n{script}\n"),
-        )
-        .expect("write fake gh");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod fake gh");
-        // The first run of a new script is slow on macOS; pay that cost before a test's timeout starts.
-        Command::new(&path)
-            .arg("warm-up")
-            .status()
-            .expect("warm up fake gh");
-        Self { dir, path }
-    }
-
-    fn printing(file: &Path) -> Self {
-        Self::new(&format!("cat '{}'", file.display()))
-    }
-}
-
-impl Drop for FakeGh {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
-    }
-}
 
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

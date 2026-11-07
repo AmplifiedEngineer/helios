@@ -9,9 +9,13 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::proc::{self, ProcError};
+use crate::secret::Secret;
 
 /// `gh auth status` output is a few KiB at most.
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+
+/// `gh auth token` prints one short line.
+const MAX_TOKEN_OUTPUT_BYTES: usize = 4096;
 
 /// The state `gh auth status` reports for an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +59,8 @@ pub enum AccountsError {
         line: usize,
         column: usize,
     },
+    #[error("gh returned an empty or non-text token")]
+    UnusableToken,
     #[error("{}", describe_run_failure(.0))]
     Proc(#[from] ProcError),
 }
@@ -137,4 +143,26 @@ pub fn list(program: &Path, timeout: Duration) -> Result<Vec<Account>, AccountsE
         MAX_OUTPUT_BYTES,
     )?;
     parse_accounts(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Runs `program auth token --hostname <host> --user <login>` and returns its output as a secret.
+pub fn token(
+    program: &Path,
+    host: &str,
+    login: &str,
+    timeout: Duration,
+) -> Result<Secret, AccountsError> {
+    let output = proc::run(
+        program,
+        &["auth", "token", "--hostname", host, "--user", login],
+        timeout,
+        MAX_TOKEN_OUTPUT_BYTES,
+    )?;
+    // from_utf8 reuses the buffer; its error type holds the bytes, so it is dropped unread.
+    let mut text = String::from_utf8(output.stdout).map_err(|_| AccountsError::UnusableToken)?;
+    text.truncate(text.trim_end().len());
+    if text.is_empty() {
+        return Err(AccountsError::UnusableToken);
+    }
+    Ok(Secret::new(text))
 }

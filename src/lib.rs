@@ -2,3 +2,4 @@
 
 pub mod accounts;
 pub mod proc;
+pub mod secret;
