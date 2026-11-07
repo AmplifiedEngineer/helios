@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI gate: formatting, shell scripts, clippy, and the test suite on Linux and
+# macOS, run once with default features and once with follow-redirect.
+
+name: ci
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs the channel and components pinned in rust-toolchain.toml.
+      - name: Install toolchain
+        run: rustup toolchain install
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      # Passes while scripts/ holds no shell scripts yet.
+      - name: shellcheck scripts
+        run: |
+          shopt -s nullglob
+          scripts=(scripts/*.sh)
+          if [ "${#scripts[@]}" -gt 0 ]; then
+            shellcheck "${scripts[@]}"
+          fi
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo clippy, no unwrap or expect in shipped code
+        run: cargo clippy --lib --bins -- -D clippy::unwrap_used -D clippy::expect_used
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      # Linux-only action; it self-skips on macOS with a confusing warning.
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        if: runner.os == 'Linux'
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            crates.io:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        run: rustup toolchain install
+
+      # Snapshot updates must be committed, never regenerated in CI.
+      - name: Refuse snapshot updates
+        run: test -z "${UPDATE_SNAPSHOTS:-}"
+
+      - name: cargo test, default features
+        run: cargo test
+
+      - name: cargo test, follow-redirect
+        run: cargo test --features follow-redirect
