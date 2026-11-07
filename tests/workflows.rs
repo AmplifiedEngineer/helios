@@ -95,6 +95,91 @@ fn write_grants(permissions: &Yaml) -> Vec<String> {
     }
 }
 
+/// Write grants a job may hold, as (file, job, scope), each with the reason it needs it.
+const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 10] = [
+    (
+        "ci-auto-rerun.yml",
+        "rerun",
+        "actions",
+        "reruns failed jobs",
+    ),
+    ("osv-scan.yml", "scan", "security-events", "uploads SARIF"),
+    ("lock.yml", "lock", "issues", "locks closed issues"),
+    (
+        "lock.yml",
+        "lock",
+        "pull-requests",
+        "locks closed pull requests",
+    ),
+    (
+        "clanker-filter.yml",
+        "clanker-filter",
+        "pull-requests",
+        "labels and comments on PRs",
+    ),
+    (
+        "dependency-review.yml",
+        "review",
+        "pull-requests",
+        "posts the failure summary comment",
+    ),
+    (
+        "scorecard.yml",
+        "analysis",
+        "security-events",
+        "uploads SARIF results",
+    ),
+    (
+        "scorecard.yml",
+        "analysis",
+        "id-token",
+        "publishes results to the Scorecard API",
+    ),
+    (
+        "stale.yml",
+        "stale",
+        "issues",
+        "labels and closes stale issues",
+    ),
+    (
+        "stale.yml",
+        "stale",
+        "pull-requests",
+        "labels and closes stale pull requests",
+    ),
+];
+
+fn is_allowed_job_write(file: &str, job: &str, scope: &str) -> bool {
+    ALLOWED_JOB_WRITES
+        .iter()
+        .any(|(f, j, s, _)| (*f, *j, *s) == (file, job, scope))
+}
+
+/// Returns each disallowed write grant: any top-level write, `write-all`
+/// anywhere, and job-level writes missing from `ALLOWED_JOB_WRITES`.
+fn write_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (name, doc) in workflows {
+        violations.extend(
+            write_grants(&doc["permissions"])
+                .into_iter()
+                .map(|scope| format!("{name} top-level: {scope}")),
+        );
+        for (job_id, job) in doc["jobs"].as_hash().into_iter().flatten() {
+            let job_id = job_id.as_str().unwrap_or("?");
+            violations.extend(
+                write_grants(&job["permissions"])
+                    .into_iter()
+                    .filter(|scope| {
+                        scope == "write-all" || !is_allowed_job_write(name, job_id, scope)
+                    })
+                    .map(|scope| format!("{name} job {job_id}: {scope}")),
+            );
+        }
+    }
+    violations
+}
+
 fn ci_run_scripts() -> Vec<String> {
     let ci = parse_workflow("ci.yml");
     let mut scripts = Vec::new();
@@ -175,24 +260,55 @@ fn no_workflow_or_job_grants_write_permission() {
     let workflows = all_workflows();
 
     // Act
-    let mut grants = Vec::new();
-    for (name, doc) in &workflows {
-        grants.extend(
-            write_grants(&doc["permissions"])
-                .into_iter()
-                .map(|g| format!("{name}: {g}")),
-        );
-        for (job_id, job) in doc["jobs"].as_hash().into_iter().flatten() {
-            grants.extend(
-                write_grants(&job["permissions"])
-                    .into_iter()
-                    .map(|g| format!("{name} job {}: {g}", job_id.as_str().unwrap_or("?"))),
-            );
-        }
-    }
+    let violations = write_violations(&workflows);
 
     // Assert
-    assert!(grants.is_empty(), "write permissions granted: {grants:?}");
+    assert!(
+        violations.is_empty(),
+        "write permissions granted: {violations:?}"
+    );
+}
+
+fn docs_from(name: &str, text: &str) -> Vec<(String, Yaml)> {
+    let mut docs = YamlLoader::load_from_str(text).expect("test YAML should parse");
+    vec![(name.to_string(), docs.remove(0))]
+}
+
+#[test]
+fn write_check_accepts_listed_job_grant_and_rejects_the_rest() {
+    // Arrange
+    let listed = docs_from(
+        "lock.yml",
+        "permissions:\n  contents: read\njobs:\n  lock:\n    permissions:\n      issues: write\n",
+    );
+    let unlisted = docs_from(
+        "lock.yml",
+        "permissions:\n  contents: read\njobs:\n  lock:\n    permissions:\n      contents: write\n",
+    );
+    let top_level = docs_from(
+        "lock.yml",
+        "permissions:\n  contents: write\njobs:\n  lock:\n    runs-on: x\n",
+    );
+    let write_all = docs_from(
+        "lock.yml",
+        "permissions:\n  contents: read\njobs:\n  lock:\n    permissions: write-all\n",
+    );
+
+    // Act
+    let listed_result = write_violations(&listed);
+    let unlisted_result = write_violations(&unlisted);
+    let top_level_result = write_violations(&top_level);
+    let write_all_result = write_violations(&write_all);
+
+    // Assert
+    assert!(
+        listed_result.is_empty(),
+        "listed grant refused: {listed_result:?}"
+    );
+    assert_eq!(unlisted_result.len(), 1, "unlisted grant accepted");
+    assert!(unlisted_result[0].contains("lock.yml") && unlisted_result[0].contains("contents"));
+    assert_eq!(top_level_result.len(), 1, "top-level write accepted");
+    assert_eq!(write_all_result.len(), 1, "write-all accepted");
 }
 
 #[test]
