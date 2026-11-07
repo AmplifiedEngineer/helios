@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependabot security updates only.
+#
+# Version updates are off: `open-pull-requests-limit: 0` on both ecosystems.
+# GitHub documents that limit as the way to disable version updates for a
+# package manager, and says security update PRs have a separate fixed limit
+# of 10 that this option does not change. The cooldown below is also not
+# applied to security updates. Security PRs come from the repo setting
+# "Dependabot security updates", which must be on.
+#
+# To turn version updates back on, raise `open-pull-requests-limit` (5 for
+# github-actions and 10 for cargo). The schedule, cooldown and groups are
+# kept so that is the only edit.
+
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+    groups:
+      all-github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+    cooldown:
+      default-days: 7
+    groups:
+      all-cargo:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 0
