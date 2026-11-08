@@ -3,8 +3,8 @@
 // The fake gh is a sh script.
 #![cfg(unix)]
 
-use forgebird::accounts::{token, AccountsError};
-use forgebird::secret::Secret;
+use helios::accounts::{token, AccountsError};
+use helios::secret::Secret;
 use std::fs;
 use std::time::Duration;
 
@@ -97,7 +97,7 @@ fn token_returns_the_trimmed_stdout_as_a_secret() {
 #[test]
 fn token_passes_host_and_user_as_separate_arguments() {
     // Arrange
-    let dir = std::env::temp_dir().join(format!("forgebird-argv-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("helios-argv-{}", std::process::id()));
     fs::create_dir_all(&dir).expect("create argv dir");
     let argv_file = dir.join("argv");
     let gh = FakeGh::new(&format!(

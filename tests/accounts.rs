@@ -3,8 +3,8 @@
 // The fake gh is a sh script.
 #![cfg(unix)]
 
-use forgebird::accounts::{list, parse_accounts, Account, AccountState, AccountsError};
-use forgebird::proc::{self, ProcError};
+use helios::accounts::{list, parse_accounts, Account, AccountState, AccountsError};
+use helios::proc::{self, ProcError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -229,7 +229,7 @@ fn bad_json_from_gh_gives_a_parse_error() {
 fn a_blocking_gh_times_out() {
     // Arrange
     let pid_file_dir = std::env::temp_dir().join(format!(
-        "forgebird-pid-{}-{}",
+        "helios-pid-{}-{}",
         std::process::id(),
         NEXT_DIR.fetch_add(1, Ordering::Relaxed)
     ));
@@ -264,7 +264,7 @@ fn a_blocking_gh_times_out() {
 #[test]
 fn output_over_the_cap_is_refused() {
     // Arrange
-    let gh = FakeGh::new("yes forgebird | head -c 5000");
+    let gh = FakeGh::new("yes helios | head -c 5000");
 
     // Act
     let result = proc::run(&gh.path, &[], TIMEOUT, 100);
@@ -279,7 +279,7 @@ fn output_over_the_cap_is_refused() {
 #[test]
 fn a_missing_gh_gives_not_found() {
     // Arrange
-    let missing = std::env::temp_dir().join("forgebird-no-such-dir/gh");
+    let missing = std::env::temp_dir().join("helios-no-such-dir/gh");
 
     // Act
     let result = list(&missing, TIMEOUT);

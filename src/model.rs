@@ -31,7 +31,7 @@ pub enum ReviewDecision {
     Approved,
     ChangesRequested,
     ReviewRequired,
-    /// A value this version of forgebird does not know, kept as received.
+    /// A value this version of helios does not know, kept as received.
     Unknown(Remote),
 }
 
@@ -55,7 +55,7 @@ pub enum CheckState {
     Error,
     Pending,
     Expected,
-    /// A value this version of forgebird does not know, kept as received.
+    /// A value this version of helios does not know, kept as received.
     Unknown(Remote),
 }
 

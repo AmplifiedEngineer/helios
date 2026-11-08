@@ -24,7 +24,7 @@ pub enum AccountState {
     Success,
     Timeout,
     Error,
-    /// A state this version of forgebird does not know.
+    /// A state this version of helios does not know.
     Unknown(String),
 }
 
