@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: every file requires maintainer review.
+* @igorjs
+
+# Workflow and governance files always require maintainer sign-off.
+.github/ @igorjs

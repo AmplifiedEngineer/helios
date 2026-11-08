@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# License compliance gate: every source file must carry an
+# SPDX-License-Identifier line in its first 5 lines, so a shebang or encoding
+# declaration on line 1 does not push the header out of range. The comment
+# marker before it is language specific, so only the identifier text is
+# matched. Extend the find expression when a new language joins the repo.
+# A dependency-license allowlist (cargo deny) belongs with the Rust CI.
+
+name: license
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: license-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  license:
+    name: spdx
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            codeload.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: SPDX headers present on every source file
+        run: |
+          set -euo pipefail
+          missing=$(find . -type f \( \
+              -name "*.rs" -o \
+              -name "*.ts" -o -name "*.tsx" -o \
+              -name "*.js" -o -name "*.jsx" -o -name "*.mjs" -o -name "*.cjs" -o \
+              -name "*.go" -o \
+              -name "*.py" -o \
+              -name "*.rb" -o \
+              -name "*.sh" -o -name "*.bash" -o \
+              -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.cc" -o -name "*.hpp" -o \
+              -name "*.cs" -o \
+              -name "*.java" -o -name "*.kt" -o \
+              -name "*.swift" -o \
+              -name "*.dart" -o \
+              -name "*.lua" -o \
+              -name "*.scala" \
+            \) \
+            -not -path "./target/*" \
+            -not -path "*/target/*" \
+            -not -path "./node_modules/*" \
+            -not -path "*/node_modules/*" \
+            -not -path "./vendor/*" \
+            -not -path "*/vendor/*" \
+            -not -path "./.git/*" \
+            -not -path "./dist/*" \
+            -not -path "./build/*" \
+            | while read -r f; do
+                head -5 "$f" | grep -q "SPDX-License-Identifier:" || echo "$f"
+              done)
+          if [ -n "$missing" ]; then
+            echo "ERROR: missing SPDX-License-Identifier header on:"
+            echo "$missing"
+            exit 1
+          fi
+          echo "OK: SPDX headers present on every source file"
