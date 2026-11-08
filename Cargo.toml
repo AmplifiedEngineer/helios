@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "forgebird"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[features]
+# Off by default so a 3xx response surfaces as an error.
+follow-redirect = ["octocrab/follow-redirect"]
+
+[dependencies]
+chrono = "=0.4.45"
+clap = { version = "=4.6.7", features = ["derive"] }
+crossterm = "=0.29.0"
+# Default features are off because they include follow-redirect, which would
+# follow a cross-origin 3xx; the `follow-redirect` feature above is the only way on.
+octocrab = { version = "=0.54.9", default-features = false, features = ["default-client", "rustls", "rustls-ring", "timeout", "retry"] }
+ratatui = { version = "=0.30.2", features = ["crossterm"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
+
+[dev-dependencies]
+toml = "=1.1.8"
+yaml-rust2 = "=0.13.0"
+
+[lints.rust]
+unsafe_code = "forbid"
