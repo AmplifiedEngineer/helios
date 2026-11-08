@@ -20,6 +20,7 @@ use std::fmt;
 /// let remote = sanitize("hello");
 /// assert_eq!(remote.as_str(), "hello");
 /// ```
+#[derive(Clone, PartialEq, Eq)]
 pub struct Remote {
     text: String,
 }
