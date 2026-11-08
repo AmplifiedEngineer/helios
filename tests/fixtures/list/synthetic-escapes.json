@@ -16,7 +16,7 @@
             "login": "evil\u001b[2Juser"
           },
           "repository": {
-            "nameWithOwner": "octo/widgets"
+            "nameWithOwner": "octo/wid\u001b[31mge\u001b]0;pwned\u0007ts"
           },
           "reviewDecision": "REVIEW_REQUIRED",
           "commits": {

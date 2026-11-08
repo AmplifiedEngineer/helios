@@ -18,6 +18,7 @@ pub struct PrKey {
 
 /// Why a pull request is on the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Tag {
     Review,
     Assigned,
@@ -25,6 +26,7 @@ pub enum Tag {
 
 /// The review decision GitHub reports for a pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReviewDecision {
     Approved,
     ChangesRequested,
@@ -46,6 +48,7 @@ impl ReviewDecision {
 
 /// The combined check state GitHub reports for a pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CheckState {
     Success,
     Failure,

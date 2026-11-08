@@ -73,9 +73,18 @@ fn a_pr_only_in_assigned_is_tagged_assigned() {
 fn the_search_strings_match_each_list() {
     // Arrange
     let expected = [
-        (ListKind::Mine, "is:pr is:open author:@me"),
-        (ListKind::Review, "is:pr is:open review-requested:@me"),
-        (ListKind::Assigned, "is:pr is:open assignee:@me -author:@me"),
+        (
+            ListKind::Mine,
+            "is:pr is:open author:@me archived:false sort:updated-desc",
+        ),
+        (
+            ListKind::Review,
+            "is:pr is:open review-requested:@me archived:false sort:updated-desc",
+        ),
+        (
+            ListKind::Assigned,
+            "is:pr is:open assignee:@me -author:@me archived:false sort:updated-desc",
+        ),
     ];
 
     for (kind, search) in expected {
@@ -170,7 +179,7 @@ fn mapped_text_is_sanitized() {
     let row = &page.rows[0];
     assert_eq!(row.title.as_str(), "Plain red title");
     assert_eq!(row.author.as_str(), "eviluser");
-    assert!(!row.key.repo.contains('\u{1b}'));
+    assert_eq!(row.key.repo, "octo/widgets");
 }
 
 /// Builds the response for result window `start..start + PAGE_SIZE` of `total` results.
@@ -265,8 +274,166 @@ fn query_variables_carry_search_page_size_and_cursor() {
     let next = query_variables(kind, Some("c100"));
 
     // Assert
-    assert_eq!(first["q"], "is:pr is:open review-requested:@me");
+    assert_eq!(
+        first["q"],
+        "is:pr is:open review-requested:@me archived:false sort:updated-desc"
+    );
     assert_eq!(first["first"], PAGE_SIZE);
     assert!(first["after"].is_null());
     assert_eq!(next["after"], "c100");
+}
+
+/// A one-node page with the given node JSON, cursor and next-page flag.
+fn page_json(nodes: &str, has_next: bool, cursor: &str) -> String {
+    format!(
+        r#"{{"data":{{"search":{{"issueCount":5,"pageInfo":{{"hasNextPage":{has_next},"endCursor":"{cursor}"}},"nodes":[{nodes}]}}}}}}"#
+    )
+}
+
+fn pr_node(number: u64, updated_at: &str) -> String {
+    format!(
+        r#"{{"number":{number},"title":"PR {number}","isDraft":false,"updatedAt":"{updated_at}","author":{{"login":"octocat"}},"repository":{{"nameWithOwner":"octo/widgets"}},"reviewDecision":null,"commits":{{"nodes":[]}}}}"#
+    )
+}
+
+fn pr_rows(entries: &[(u64, &str)]) -> Vec<PrSummary> {
+    let nodes: Vec<String> = entries.iter().map(|(n, t)| pr_node(*n, t)).collect();
+    map_page(HOST, ACCOUNT, &page_json(&nodes.join(","), false, "c"))
+        .expect("map rows")
+        .rows
+}
+
+#[test]
+fn pages_with_no_pr_rows_stop_after_the_page_bound() {
+    // Arrange
+    let mut calls = 0;
+    let fetch = |_: Option<&str>| -> Result<SearchPage, ListError> {
+        calls += 1;
+        map_page(
+            HOST,
+            ACCOUNT,
+            &page_json("null", true, &format!("cursor-{calls}")),
+        )
+    };
+
+    // Act
+    let listing = collect(fetch).expect("collect");
+
+    // Assert
+    assert!(listing.rows.is_empty());
+    assert!(listing.partial);
+    assert_eq!(calls, SEARCH_CAP / PAGE_SIZE);
+}
+
+#[test]
+fn a_repeated_cursor_stops_paging_and_marks_the_list_partial() {
+    // Arrange
+    let mut calls = 0;
+    let fetch = |_: Option<&str>| -> Result<SearchPage, ListError> {
+        calls += 1;
+        map_page(HOST, ACCOUNT, &page_json("null", true, "same"))
+    };
+
+    // Act
+    let listing = collect(fetch).expect("collect");
+
+    // Assert
+    assert!(listing.partial);
+    assert_eq!(calls, 2);
+}
+
+#[test]
+fn a_page_with_data_and_errors_sets_had_errors_and_marks_the_list_partial() {
+    // Arrange
+    let json = format!(
+        r#"{{"errors":[{{"message":"partial failure"}}],"data":{{"search":{{"issueCount":1,"pageInfo":{{"hasNextPage":false,"endCursor":null}},"nodes":[{}]}}}}}}"#,
+        pr_node(1, "2026-11-05T10:00:00Z")
+    );
+
+    // Act
+    let page = map_page(HOST, ACCOUNT, &json).expect("map page");
+    let listing = collect(|_| map_page(HOST, ACCOUNT, &json)).expect("collect");
+
+    // Assert
+    assert!(page.had_errors);
+    assert_eq!(page.rows.len(), 1);
+    assert!(listing.partial);
+}
+
+#[test]
+fn errors_without_data_give_the_api_error() {
+    // Arrange
+    let json = r#"{"errors":[{"message":"boom"}]}"#;
+
+    // Act
+    let error = map_page(HOST, ACCOUNT, json).expect_err("api error");
+
+    // Assert
+    assert!(matches!(error, ListError::Api), "{error:?}");
+}
+
+#[test]
+fn a_bad_updated_at_gives_the_timestamp_error() {
+    // Arrange
+    let json = page_json(&pr_node(1, "yesterday"), false, "c");
+
+    // Act
+    let error = map_page(HOST, ACCOUNT, &json).expect_err("bad timestamp");
+
+    // Assert
+    assert!(matches!(error, ListError::Timestamp), "{error:?}");
+}
+
+#[test]
+fn merged_rows_are_ordered_review_first_newest_first_then_by_key() {
+    // Arrange
+    let review = pr_rows(&[
+        (1, "2026-11-01T10:00:00Z"),
+        (2, "2026-11-03T10:00:00Z"),
+        (4, "2026-11-02T10:00:00Z"),
+        (3, "2026-11-02T10:00:00Z"),
+    ]);
+    let assigned = pr_rows(&[
+        (5, "2026-11-04T10:00:00Z"),
+        (6, "2026-11-06T10:00:00Z"),
+        (2, "2026-11-09T10:00:00Z"),
+    ]);
+
+    // Act
+    let merged = merge_needs_me(review, assigned);
+
+    // Assert
+    let order: Vec<u64> = merged.iter().map(|row| row.key.number).collect();
+    assert_eq!(order, vec![2, 3, 4, 1, 6, 5]);
+}
+
+#[test]
+fn empty_and_null_nodes_are_skipped_next_to_a_pr() {
+    // Arrange
+    let nodes = format!("{{}},null,{},{{}}", pr_node(7, "2026-11-05T10:00:00Z"));
+    let json = page_json(&nodes, false, "c");
+
+    // Act
+    let page = map_page(HOST, ACCOUNT, &json).expect("map page");
+
+    // Assert
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].key.number, 7);
+}
+
+#[test]
+fn non_default_review_decision_and_check_state_map() {
+    // Arrange
+    let node = r#"{"number":8,"title":"t","isDraft":false,"updatedAt":"2026-11-05T10:00:00Z","author":{"login":"octocat"},"repository":{"nameWithOwner":"octo/widgets"},"reviewDecision":"CHANGES_REQUESTED","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE"}}}]}}"#;
+    let json = page_json(node, false, "c");
+
+    // Act
+    let page = map_page(HOST, ACCOUNT, &json).expect("map page");
+
+    // Assert
+    assert_eq!(
+        page.rows[0].review_decision,
+        Some(ReviewDecision::ChangesRequested)
+    );
+    assert_eq!(page.rows[0].check_state, Some(CheckState::Failure));
 }

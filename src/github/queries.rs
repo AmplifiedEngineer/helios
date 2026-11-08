@@ -17,6 +17,9 @@ pub const SEARCH_CAP: usize = 1000;
 /// Results asked for per page; the GraphQL maximum.
 pub const PAGE_SIZE: usize = 100;
 
+/// Pages that can hold `SEARCH_CAP` results; paging stops here even if rows stay short of the cap.
+const MAX_PAGES: usize = SEARCH_CAP / PAGE_SIZE;
+
 /// Variables: `$q` search string, `$first` page size, `$after` cursor or null.
 pub const LIST_QUERY: &str = r#"query($q: String!, $first: Int!, $after: String) {
   search(query: $q, type: ISSUE, first: $first, after: $after) {
@@ -37,15 +40,17 @@ pub const LIST_QUERY: &str = r#"query($q: String!, $first: Int!, $after: String)
 
 /// The searches behind the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ListKind {
     Mine,
     Review,
     Assigned,
 }
 
-const MINE_SEARCH: &str = "is:pr is:open author:@me";
-const REVIEW_SEARCH: &str = "is:pr is:open review-requested:@me";
-const ASSIGNED_SEARCH: &str = "is:pr is:open assignee:@me -author:@me";
+const MINE_SEARCH: &str = "is:pr is:open author:@me archived:false sort:updated-desc";
+const REVIEW_SEARCH: &str = "is:pr is:open review-requested:@me archived:false sort:updated-desc";
+const ASSIGNED_SEARCH: &str =
+    "is:pr is:open assignee:@me -author:@me archived:false sort:updated-desc";
 
 /// Login shown for an author GitHub no longer has (a deleted account).
 const GHOST_LOGIN: &str = "ghost";
@@ -86,6 +91,7 @@ pub struct Listing {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ListError {
     /// Carries no message text: serde_json echoes offending input values in it.
     #[error("could not parse the pull request search response ({category}) at line {line} column {column}")]
@@ -282,21 +288,28 @@ pub fn merge_needs_me(review: Vec<PrSummary>, assigned: Vec<PrSummary>) -> Vec<P
     merged
 }
 
-/// Pages through `fetch` (given the cursor to resume after) until the last page or the search cap.
+/// Pages through `fetch` (given the cursor to resume after) until the last page or a bound.
+///
+/// Stops early, marking the list partial, after `MAX_PAGES` pages or when GitHub repeats a cursor.
 pub fn collect(
     mut fetch: impl FnMut(Option<&str>) -> Result<SearchPage, ListError>,
 ) -> Result<Listing, ListError> {
     let mut rows = Vec::new();
     let mut partial = false;
     let mut cursor: Option<String> = None;
-    loop {
+    for fetched in 1..=MAX_PAGES {
         let page = fetch(cursor.as_deref())?;
         partial |= page.had_errors || page.issue_count >= SEARCH_CAP;
         rows.extend(page.rows);
-        match page.end_cursor {
-            Some(next) if page.has_next_page && rows.len() < SEARCH_CAP => cursor = Some(next),
+        let next = match page.end_cursor {
+            Some(next) if page.has_next_page && rows.len() < SEARCH_CAP => next,
             _ => break,
+        };
+        if fetched == MAX_PAGES || cursor.as_deref() == Some(next.as_str()) {
+            partial = true;
+            break;
         }
+        cursor = Some(next);
     }
     Ok(Listing { rows, partial })
 }
