@@ -95,15 +95,90 @@ fn write_grants(permissions: &Yaml) -> Vec<String> {
     }
 }
 
+const APP_TOKEN_ACTION: &str = "actions/create-github-app-token@";
+const APP_TOKEN_INPUT_PREFIX: &str = "permission-";
+const APP_TOKEN_SCOPE_PREFIX: &str = "app-token:";
+/// Triggers that run with secrets on fork-controlled input.
+const RISKY_TRIGGERS: [&str; 2] = ["pull_request_target", "workflow_run"];
+
+/// Scope reported for an App token step that sets no `permission-*` input,
+/// because the action then grants every permission the App installation has.
+const APP_TOKEN_ALL_SCOPE: &str = "all";
+const READ_LEVEL: &str = "read";
+
+/// Scopes a job requests for a GitHub App token, as `app-token:<scope>`.
+/// Any level other than a literal `read` counts, so expressions and `admin`
+/// fail closed.
+fn app_token_grants(job: &Yaml) -> Vec<String> {
+    let mut grants = Vec::new();
+    for step in job["steps"].as_vec().into_iter().flatten() {
+        let uses = step["uses"].as_str().unwrap_or("").to_ascii_lowercase();
+        if !uses.starts_with(APP_TOKEN_ACTION) {
+            continue;
+        }
+        let mut has_permission_input = false;
+        for (input, level) in step["with"].as_hash().into_iter().flatten() {
+            let Some(scope) = input
+                .as_str()
+                .and_then(|name| name.strip_prefix(APP_TOKEN_INPUT_PREFIX))
+            else {
+                continue;
+            };
+            has_permission_input = true;
+            if level.as_str() != Some(READ_LEVEL) {
+                grants.push(format!("{APP_TOKEN_SCOPE_PREFIX}{scope}"));
+            }
+        }
+        if !has_permission_input {
+            grants.push(format!("{APP_TOKEN_SCOPE_PREFIX}{APP_TOKEN_ALL_SCOPE}"));
+        }
+    }
+    grants
+}
+
+/// The write scopes the guard can see for a job: `permissions` writes plus App
+/// token requests. It does not see tokens that come from other secrets.
+fn job_scopes(job: &Yaml) -> Vec<String> {
+    let mut scopes = write_grants(&job["permissions"]);
+    scopes.extend(app_token_grants(job));
+    scopes
+}
+
+/// Each workflow that triggers on an event in `RISKY_TRIGGERS`, or whose `on`
+/// key the check cannot read.
+fn risky_trigger_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (name, doc) in workflows {
+        let entries: Vec<&Yaml> = match &doc["on"] {
+            event @ Yaml::String(_) => vec![event],
+            Yaml::Array(items) => items.iter().collect(),
+            Yaml::Hash(map) => map.keys().collect(),
+            _ => {
+                violations.push(format!("{name}: no readable on trigger"));
+                continue;
+            }
+        };
+        for entry in entries {
+            match entry.as_str() {
+                Some(event) if RISKY_TRIGGERS.contains(&event) => {
+                    violations.push(format!("{name}: {event}"));
+                }
+                Some(_) => {}
+                None => violations.push(format!("{name}: unreadable on entry")),
+            }
+        }
+    }
+    violations
+}
+
 /// Write grants a job may hold, as (file, job, scope), each with the reason it needs it.
-const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 10] = [
+const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 12] = [
     (
         "ci-auto-rerun.yml",
         "rerun",
         "actions",
         "reruns failed jobs",
     ),
-    ("osv-scan.yml", "scan", "security-events", "uploads SARIF"),
     ("lock.yml", "lock", "issues", "locks closed issues"),
     (
         "lock.yml",
@@ -126,14 +201,32 @@ const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 10] = [
     (
         "scorecard.yml",
         "analysis",
-        "security-events",
-        "uploads SARIF results",
-    ),
-    (
-        "scorecard.yml",
-        "analysis",
         "id-token",
         "publishes results to the Scorecard API",
+    ),
+    (
+        "dependabot-auto-merge.yml",
+        "auto-merge",
+        "app-token:contents",
+        "app token enables auto-merge",
+    ),
+    (
+        "dependabot-auto-merge.yml",
+        "auto-merge",
+        "app-token:pull-requests",
+        "app token approves and merges",
+    ),
+    (
+        "auto-update-pr.yml",
+        "update",
+        "app-token:contents",
+        "app token pushes the branch update",
+    ),
+    (
+        "auto-update-pr.yml",
+        "update",
+        "app-token:pull-requests",
+        "app token reads and updates pull requests",
     ),
     (
         "stale.yml",
@@ -162,7 +255,7 @@ fn job_write_grants(workflows: &[(String, Yaml)]) -> Vec<(String, String, String
     for (name, doc) in workflows {
         for (job_id, job) in doc["jobs"].as_hash().into_iter().flatten() {
             let job_id = job_id.as_str().unwrap_or("?");
-            for scope in write_grants(&job["permissions"]) {
+            for scope in job_scopes(job) {
                 grants.push((name.clone(), job_id.to_string(), scope));
             }
         }
@@ -192,7 +285,7 @@ fn write_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
                 continue;
             }
             violations.extend(
-                write_grants(&job["permissions"])
+                job_scopes(job)
                     .into_iter()
                     .filter(|scope| {
                         scope == "write-all" || !is_allowed_job_write(name, job_id, scope)
@@ -458,4 +551,136 @@ fn guard_script_passes_when_update_snapshots_is_unset() {
         status.success(),
         "guard should exit zero when UPDATE_SNAPSHOTS is unset"
     );
+}
+
+#[test]
+fn app_token_write_input_counts_as_a_job_grant() {
+    // Arrange
+    let step = "    steps:\n      - uses: actions/create-github-app-token@abc\n        with:\n          permission-contents: write\n          permission-actions: read\n";
+    let unlisted = docs_from("other.yml", &format!("jobs:\n  j:\n{step}"));
+    let listed = docs_from(
+        "dependabot-auto-merge.yml",
+        &format!("jobs:\n  auto-merge:\n{step}"),
+    );
+
+    // Act
+    let unlisted_result = write_violations(&unlisted);
+    let listed_result = write_violations(&listed);
+
+    // Assert
+    assert_eq!(unlisted_result, ["other.yml job j: app-token:contents"]);
+    assert_eq!(listed_result, Vec::<String>::new());
+}
+
+#[test]
+fn risky_triggers_are_found_in_every_trigger_shape() {
+    // Arrange
+    let string = docs_from("a.yml", "on: pull_request_target\njobs: {}\n");
+    let list = docs_from("b.yml", "on: [push, workflow_run]\njobs: {}\n");
+    let map = docs_from(
+        "c.yml",
+        "on:\n  workflow_run:\n    types: [completed]\njobs: {}\n",
+    );
+    let safe = docs_from("d.yml", "on:\n  pull_request:\n  push:\njobs: {}\n");
+
+    // Act
+    let results = [
+        risky_trigger_violations(&string),
+        risky_trigger_violations(&list),
+        risky_trigger_violations(&map),
+        risky_trigger_violations(&safe),
+    ];
+
+    // Assert
+    assert_eq!(results[0], ["a.yml: pull_request_target"]);
+    assert_eq!(results[1], ["b.yml: workflow_run"]);
+    assert_eq!(results[2], ["c.yml: workflow_run"]);
+    assert_eq!(results[3], Vec::<String>::new());
+}
+
+#[test]
+fn no_workflow_uses_a_trigger_that_exposes_secrets_to_forks() {
+    // Arrange
+    let workflows = all_workflows();
+
+    // Act
+    let violations = risky_trigger_violations(&workflows);
+
+    // Assert
+    assert!(violations.is_empty(), "risky triggers: {violations:?}");
+}
+
+fn token_job(uses: &str, with: &str) -> Vec<(String, Yaml)> {
+    docs_from(
+        "other.yml",
+        &format!("jobs:\n  j:\n    steps:\n      - uses: {uses}\n{with}"),
+    )
+}
+
+#[test]
+fn app_token_check_fails_closed_on_unusual_steps() {
+    // Arrange
+    let action = "actions/create-github-app-token@abc";
+    let no_with = token_job(action, "");
+    let no_permission_inputs = token_job(action, "        with:\n          client-id: x\n");
+    let expression = token_job(
+        action,
+        "        with:\n          permission-contents: ${{ matrix.level }}\n",
+    );
+    let admin = token_job(
+        action,
+        "        with:\n          permission-members: admin\n",
+    );
+    let read_only = token_job(
+        action,
+        "        with:\n          permission-contents: read\n",
+    );
+    let upper_case = token_job(
+        "Actions/Create-GitHub-App-Token@abc",
+        "        with:\n          permission-contents: write\n",
+    );
+    let other_action = token_job(
+        "actions/checkout@abc",
+        "        with:\n          permission-contents: write\n",
+    );
+
+    // Act
+    let results = [
+        write_violations(&no_with),
+        write_violations(&no_permission_inputs),
+        write_violations(&expression),
+        write_violations(&admin),
+        write_violations(&read_only),
+        write_violations(&upper_case),
+        write_violations(&other_action),
+    ];
+
+    // Assert
+    assert_eq!(results[0], ["other.yml job j: app-token:all"]);
+    assert_eq!(results[1], ["other.yml job j: app-token:all"]);
+    assert_eq!(results[2], ["other.yml job j: app-token:contents"]);
+    assert_eq!(results[3], ["other.yml job j: app-token:members"]);
+    assert_eq!(results[4], Vec::<String>::new());
+    assert_eq!(results[5], ["other.yml job j: app-token:contents"]);
+    assert_eq!(results[6], Vec::<String>::new());
+}
+
+#[test]
+fn trigger_check_fails_closed_on_unreadable_on_key() {
+    // Arrange
+    let missing = docs_from("a.yml", "jobs: {}\n");
+    let scalar = docs_from("b.yml", "on: 5\njobs: {}\n");
+    let nested = docs_from("c.yml", "on: [push, [workflow_run]]\njobs: {}\n");
+
+    // Act
+    let results = [
+        risky_trigger_violations(&missing),
+        risky_trigger_violations(&scalar),
+        risky_trigger_violations(&nested),
+    ];
+
+    // Assert
+    assert_eq!(results[0], ["a.yml: no readable on trigger"]);
+    assert_eq!(results[1], ["b.yml: no readable on trigger"]);
+    assert_eq!(results[2], ["c.yml: unreadable on entry"]);
 }
