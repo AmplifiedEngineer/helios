@@ -19,6 +19,7 @@ const MAX_TOKEN_OUTPUT_BYTES: usize = 4096;
 
 /// The state `gh auth status` reports for an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AccountState {
     Success,
     Timeout,
@@ -51,6 +52,7 @@ pub struct Account {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum AccountsError {
     /// Carries no message text: serde_json echoes offending input values in it.
     #[error("could not parse gh auth status output ({category}) at line {line} column {column}")]
@@ -59,6 +61,8 @@ pub enum AccountsError {
         line: usize,
         column: usize,
     },
+    #[error("gh printed output that is not valid text")]
+    NotText,
     #[error("gh returned an empty or non-text token")]
     UnusableToken,
     #[error("{}", describe_run_failure(.0))]
@@ -142,7 +146,9 @@ pub fn list(program: &Path, timeout: Duration) -> Result<Vec<Account>, AccountsE
         timeout,
         MAX_OUTPUT_BYTES,
     )?;
-    parse_accounts(&String::from_utf8_lossy(&output.stdout))
+    // The error type holds the bytes, so it is dropped unread.
+    let text = std::str::from_utf8(&output.stdout).map_err(|_| AccountsError::NotText)?;
+    parse_accounts(text)
 }
 
 /// Runs `program auth token --hostname <host> --user <login>` and returns its output as a secret.

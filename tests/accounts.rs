@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// The fake gh is a sh script.
+#![cfg(unix)]
+
 use forgebird::accounts::{list, parse_accounts, Account, AccountState, AccountsError};
 use forgebird::proc::{self, ProcError};
 use std::fs;
@@ -16,6 +19,10 @@ use fake_gh::{FakeGh, NEXT_DIR};
 const BLOCKING_TIMEOUT: Duration = Duration::from_millis(200);
 /// Room for a slow process start in every test that expects gh to finish.
 const TIMEOUT: Duration = Duration::from_secs(5);
+/// Far above the grace wait and far below the 30 s a stray sleep lasts.
+const PROMPT_RETURN: Duration = Duration::from_secs(10);
+/// A timeout that no test should ever reach.
+const NEVER: Duration = Duration::from_secs(60);
 /// Room for process start and teardown on a loaded machine.
 const TIMEOUT_SLACK: Duration = Duration::from_millis(1500);
 
@@ -82,12 +89,32 @@ fn parses_the_recorded_one_account_fixture() {
     assert_eq!(accounts.len(), 1);
     let account = &accounts[0];
     assert_eq!(account.host, "github.com");
-    assert_eq!(account.login, "igorjs");
+    assert_eq!(account.login, "octocat");
     assert!(account.active);
     assert_eq!(account.state, AccountState::Success);
-    assert_eq!(account.scopes.len(), 8);
-    assert_eq!(account.scopes[0], "admin:org");
-    assert_eq!(account.scopes[7], "workflow");
+    assert_eq!(account.scopes, vec!["repo", "read:org"]);
+}
+
+#[test]
+fn parses_the_timeout_state_and_keeps_an_unknown_one() {
+    // Arrange
+    let json = r#"{"hosts":{"github.com":[
+        {"state":"timeout","active":true,"host":"github.com","login":"octocat"},
+        {"state":"somethingnew","active":false,"host":"github.com","login":"hubot"}
+    ]}}"#;
+
+    // Act
+    let accounts = parse_accounts(json).expect("parse");
+
+    // Assert
+    assert_eq!(
+        find(&accounts, "github.com", "octocat").state,
+        AccountState::Timeout
+    );
+    assert_eq!(
+        find(&accounts, "github.com", "hubot").state,
+        AccountState::Unknown("somethingnew".to_string())
+    );
 }
 
 #[test]
@@ -303,4 +330,68 @@ fn a_failing_gh_never_leaks_stderr() {
     ] {
         assert!(!text.contains(&sentinel), "leaked: {text}");
     }
+}
+
+#[test]
+fn a_grandchild_holding_the_pipes_does_not_hang_run() {
+    // Arrange
+    let gh = FakeGh::new("sleep 30 &\nexit 0");
+
+    // Act
+    let started = Instant::now();
+    let result = proc::run(&gh.path, &[], TIMEOUT, 1024);
+    let elapsed = started.elapsed();
+
+    // Assert
+    assert!(matches!(result, Err(ProcError::Timeout)), "{result:?}");
+    assert!(elapsed < PROMPT_RETURN, "took {elapsed:?}");
+}
+
+#[test]
+fn endless_stdout_hits_the_cap_long_before_the_timeout() {
+    // Arrange
+    let gh = FakeGh::new("exec yes");
+
+    // Act
+    let started = Instant::now();
+    let result = proc::run(&gh.path, &[], NEVER, 100);
+    let elapsed = started.elapsed();
+
+    // Assert
+    assert!(
+        matches!(result, Err(ProcError::OutputTooLarge)),
+        "{result:?}"
+    );
+    assert!(elapsed < PROMPT_RETURN, "took {elapsed:?}");
+}
+
+#[test]
+fn endless_stderr_hits_the_cap_long_before_the_timeout() {
+    // Arrange
+    let gh = FakeGh::new("exec yes >&2");
+
+    // Act
+    let started = Instant::now();
+    let result = proc::run(&gh.path, &[], NEVER, 100);
+    let elapsed = started.elapsed();
+
+    // Assert
+    assert!(
+        matches!(result, Err(ProcError::OutputTooLarge)),
+        "{result:?}"
+    );
+    assert!(elapsed < PROMPT_RETURN, "took {elapsed:?}");
+}
+
+#[test]
+fn non_text_output_from_gh_is_an_error_without_the_bytes() {
+    // Arrange
+    let gh = FakeGh::new(r"printf '\377'");
+
+    // Act
+    let error = list(&gh.path, TIMEOUT).expect_err("non-text output must fail");
+
+    // Assert
+    assert!(matches!(error, AccountsError::NotText), "{error:?}");
+    assert!(!error.to_string().contains('\u{FFFD}'), "{error}");
 }

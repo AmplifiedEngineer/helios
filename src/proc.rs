@@ -6,13 +6,15 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 
 /// Why a program run failed. No variant holds the program's output, which can
 /// carry secrets.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProcError {
     #[error("program not found")]
     NotFound,
@@ -29,6 +31,8 @@ pub enum ProcError {
 /// How often the wait loop checks for exit, the timeout and the output cap.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READ_CHUNK: usize = 8192;
+/// How long to wait for a pipe to close after the child is gone; a grandchild can hold it open.
+const DRAIN_GRACE: Duration = Duration::from_millis(500);
 
 /// Output read from one pipe, or why reading stopped.
 enum Drained {
@@ -61,11 +65,17 @@ fn spawn_drain(
     pipe: Option<impl Read + Send + 'static>,
     max_bytes: usize,
     over_cap: Arc<AtomicBool>,
-) -> JoinHandle<Drained> {
-    thread::spawn(move || match pipe {
-        Some(pipe) => drain(pipe, max_bytes, &over_cap),
-        None => Drained::Done(Vec::new()),
-    })
+) -> Receiver<Drained> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let drained = match pipe {
+            Some(pipe) => drain(pipe, max_bytes, &over_cap),
+            None => Drained::Done(Vec::new()),
+        };
+        // The receiver is gone once `run` has given up on this pipe.
+        let _ = sender.send(drained);
+    });
+    receiver
 }
 
 fn kill_and_reap(child: &mut Child) {
@@ -74,10 +84,13 @@ fn kill_and_reap(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn join(handle: JoinHandle<Drained>) -> Drained {
-    handle
-        .join()
-        .unwrap_or(Drained::Failed(io::ErrorKind::Other))
+/// Waits up to `DRAIN_GRACE` for a drain thread; a stuck one is left detached.
+fn receive(receiver: &Receiver<Drained>) -> Result<Drained, ProcError> {
+    match receiver.recv_timeout(DRAIN_GRACE) {
+        Ok(drained) => Ok(drained),
+        Err(RecvTimeoutError::Timeout) => Err(ProcError::Timeout),
+        Err(RecvTimeoutError::Disconnected) => Ok(Drained::Failed(io::ErrorKind::Other)),
+    }
 }
 
 /// Runs `program` directly, without a shell.
@@ -126,8 +139,8 @@ pub fn run(
         }
     };
 
-    let (stdout, stderr) = (join(stdout), join(stderr));
     let status = outcome?;
+    let (stdout, stderr) = (receive(&stdout)?, receive(&stderr)?);
     match (stdout, stderr) {
         (Drained::OverCap, _) | (_, Drained::OverCap) => Err(ProcError::OutputTooLarge),
         (Drained::Failed(kind), _) | (_, Drained::Failed(kind)) => Err(ProcError::Io { kind }),

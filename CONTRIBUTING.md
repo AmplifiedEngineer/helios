@@ -19,7 +19,7 @@ Thanks for helping. Keep changes small and clear.
 ## Code rules
 
 - Pin every dependency with an exact `=` version in `Cargo.toml`.
-- Put an SPDX header on every file: `SPDX-License-Identifier: Apache-2.0`.
+- Put an SPDX header on every source, script, workflow and doc file: `SPDX-License-Identifier: Apache-2.0`. The lockfile, `.gitignore` and JSON fixtures are exempt.
 - Unsafe code is forbidden.
 - No `unwrap` or `expect` outside tests.
 

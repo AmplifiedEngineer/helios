@@ -16,6 +16,8 @@ const GITHUB_PAT_MIN_BODY_LEN: usize = 22;
 /// Exact body length after `ghp_`-style prefixes for a classic token.
 const GITHUB_TOKEN_BODY_LEN: usize = 36;
 const CLASSIC_TOKEN_PREFIXES: [&str; 5] = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"];
+/// A JSON `token` key, quotes included so `tokenSource` does not match.
+const TOKEN_KEY: &str = "\"token\"";
 const AUTH_SCHEMES: [&str; 3] = ["bearer", "token", "basic"];
 const REDACTION_MARKERS: [&str; 3] = ["[redacted]", "<redacted>", "redacted"];
 
@@ -77,6 +79,13 @@ fn scan_line(line: &str) -> Vec<&'static str> {
         if let Some(value) = authorization_value(&line[at + "authorization".len()..]) {
             if !is_redacted(&value) {
                 kinds.push("authorization");
+            }
+        }
+    }
+    for (at, _) in lower.match_indices(TOKEN_KEY) {
+        if let Some(value) = authorization_value(&line[at + TOKEN_KEY.len() - 1..]) {
+            if !is_redacted(&value) {
+                kinds.push("token_field");
             }
         }
     }
@@ -190,6 +199,11 @@ fn planted_cases() -> Vec<(String, String)> {
     cases.push((
         "authorization_header".into(),
         "Authorization: token abc123def456\n".into(),
+    ));
+    let plain_value = ["abc123", "def456"].concat();
+    cases.push((
+        "token_json_key".into(),
+        format!(r#"{{"token": "{plain_value}"}}"#),
     ));
     cases.push((
         "authorization_json".into(),

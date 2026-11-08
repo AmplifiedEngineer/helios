@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use forgebird::accounts::token;
+// The fake gh is a sh script.
+#![cfg(unix)]
+
+use forgebird::accounts::{token, AccountsError};
 use forgebird::secret::Secret;
 use std::fs;
 use std::time::Duration;
@@ -122,4 +125,34 @@ fn token_passes_host_and_user_as_separate_arguments() {
             "octo cat"
         ]
     );
+}
+
+#[test]
+fn token_refuses_output_that_is_empty_blank_or_not_text() {
+    // Arrange
+    let sentinel = sentinel();
+    let scripts = [
+        ("prints nothing", "true".to_string()),
+        ("prints a newline", "echo".to_string()),
+        ("prints invalid utf-8", r"printf '\377'".to_string()),
+        (
+            "prints invalid utf-8 after text",
+            format!(r"printf '{sentinel}\377'"),
+        ),
+    ];
+
+    for (label, script) in scripts {
+        let gh = FakeGh::new(&script);
+
+        // Act
+        let result = token(&gh.path, "github.com", "octocat", TIMEOUT);
+
+        // Assert
+        let error = result.expect_err(label);
+        assert!(matches!(error, AccountsError::UnusableToken), "{label}");
+        for text in [error.to_string(), format!("{error:?}")] {
+            assert!(!text.contains(&sentinel), "{label} leaked: {text}");
+            assert!(!text.contains('\u{FFFD}'), "{label} leaked bytes: {text}");
+        }
+    }
 }
