@@ -1,0 +1,105 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "title": "Plain \u001b[31mred\u001b[0m title\u001b]0;pwned\u0007",
+        "body": "Body \u001b[2Jwith\u001b]0;pwned\u0007 escapes\nsecond line",
+        "state": "OPEN",
+        "author": null,
+        "labels": {
+          "nodes": [
+            { "name": "bug\u001b[31m!\u001b[0m" }
+          ]
+        },
+        "reviewRequests": {
+          "nodes": [
+            { "requestedReviewer": { "__typename": "User", "login": "rev\u001b[2Jiewer" } },
+            { "requestedReviewer": { "__typename": "Team", "name": "core\u001b]0;pwned\u0007team" } }
+          ]
+        },
+        "reviewDecision": "REVIEW_REQUIRED",
+        "comments": {
+          "nodes": [
+            {
+              "author": { "login": "talker" },
+              "body": "Issue \u001b[1mcomment\u001b[0m text",
+              "createdAt": "2026-11-05T10:00:00Z"
+            }
+          ]
+        },
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false,
+              "path": "src/main.rs",
+              "line": 7,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": { "login": "reviewer" },
+                    "body": "Thread \u001b[31mcomment\u001b[0m text",
+                    "createdAt": "2026-11-05T10:05:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": true,
+              "path": "src/lib.rs",
+              "line": null,
+              "comments": { "nodes": [] }
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "1111111111111111111111111111111111111111",
+                "messageHeadline": "Fix \u001b[31mthe\u001b[0m thing\u001b]0;pwned\u0007",
+                "committedDate": "2026-11-05T09:00:00Z",
+                "author": { "name": "Dev One", "user": { "login": "devone" } }
+              }
+            }
+          ]
+        },
+        "checkRuns": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build \u001b[32m(linux)\u001b[0m",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "detailsUrl": "https://example.test/checks/1"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "mystery",
+                        "status": "COMPLETED",
+                        "conclusion": "FUTURE_STATE",
+                        "detailsUrl": null
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "running",
+                        "status": "IN_PROGRESS",
+                        "conclusion": null,
+                        "detailsUrl": "https://example.test/checks/3"
+                      },
+                      { "__typename": "StatusContext" }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

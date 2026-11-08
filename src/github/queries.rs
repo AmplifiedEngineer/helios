@@ -8,7 +8,11 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::model::{CheckState, PrKey, PrSummary, ReviewDecision, Tag};
+use crate::model::{
+    ChangedFile, CheckRun, CheckRunState, CheckState, Comment, CommitSummary, DiffGap, FileDiff,
+    PrDetail, PrKey, PrState, PrSummary, ReviewDecision, ReviewThread, Tag,
+};
+use crate::remote::Remote;
 use crate::sanitize::sanitize;
 
 /// GitHub stops a search after this many results.
@@ -205,12 +209,16 @@ struct Rollup {
     state: String,
 }
 
+fn login_or_ghost(author: Option<Author>) -> String {
+    author.map_or(GHOST_LOGIN.to_owned(), |a| a.login)
+}
+
 impl PrNode {
     fn into_summary(self, host: &str, account: &str) -> Result<PrSummary, ListError> {
         let updated_at = DateTime::parse_from_rfc3339(&self.updated_at)
             .map_err(|_| ListError::Timestamp)?
             .with_timezone(&Utc);
-        let author = self.author.map_or(GHOST_LOGIN.to_owned(), |a| a.login);
+        let author = login_or_ghost(self.author);
         let check_state = self
             .commits
             .nodes
@@ -318,4 +326,374 @@ pub fn filter_drafts(rows: Vec<PrSummary>, show_drafts: bool) -> Vec<PrSummary> 
     rows.into_iter()
         .filter(|row| show_drafts || !row.is_draft)
         .collect()
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum FilesError {
+    #[error("could not parse the pull request files response")]
+    Parse,
+}
+
+/// Files asked for per page; the REST maximum.
+pub const FILES_PER_PAGE: usize = 100;
+
+const STATUS_RENAMED: &str = "renamed";
+const STATUS_MODIFIED: &str = "modified";
+
+/// The relative REST path of one page of a pull request's files.
+pub fn files_path(owner: &str, repo: &str, number: u64, page: usize) -> String {
+    format!("/repos/{owner}/{repo}/pulls/{number}/files?per_page={FILES_PER_PAGE}&page={page}")
+}
+
+#[derive(Deserialize)]
+struct FileNode {
+    filename: String,
+    previous_filename: Option<String>,
+    status: String,
+    changes: u64,
+    blob_url: String,
+    patch: Option<String>,
+}
+
+impl FileNode {
+    /// A missing patch with no changes is told apart by status, since the REST entry carries no
+    /// binary flag; added and any other status with zero changes is an empty file.
+    fn gap(&self) -> DiffGap {
+        if self.changes > 0 {
+            return DiffGap::Truncated;
+        }
+        match self.status.as_str() {
+            STATUS_RENAMED => DiffGap::RenamedOnly,
+            STATUS_MODIFIED => DiffGap::Binary,
+            _ => DiffGap::Empty,
+        }
+    }
+
+    fn into_changed_file(self) -> ChangedFile {
+        let diff = match &self.patch {
+            Some(patch) => FileDiff::Patch(sanitize(patch)),
+            None => FileDiff::Unavailable {
+                gap: self.gap(),
+                web_url: sanitize(&self.blob_url),
+            },
+        };
+        ChangedFile {
+            path: sanitize(&self.filename),
+            previous_path: self.previous_filename.as_deref().map(sanitize),
+            diff,
+        }
+    }
+}
+
+/// Maps one page of the REST pulls files response into changed files.
+pub fn map_files(json: &str) -> Result<Vec<ChangedFile>, FilesError> {
+    let nodes: Vec<FileNode> = serde_json::from_str(json).map_err(|_| FilesError::Parse)?;
+    Ok(nodes.into_iter().map(FileNode::into_changed_file).collect())
+}
+
+/// Variables: `$owner`, `$repo` and `$number` of the pull request.
+pub const DETAIL_QUERY: &str = r#"query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      title body state
+      author { login }
+      labels(first: 50) { nodes { name } }
+      reviewRequests(first: 50) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } } } }
+      reviewDecision
+      comments(first: 100) { nodes { author { login } body createdAt } }
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved path line
+          comments(first: 50) { nodes { author { login } body createdAt } }
+        }
+      }
+      commits(first: 100) {
+        nodes { commit { oid messageHeadline committedDate author { name user { login } } } }
+      }
+      checkRuns: commits(last: 1) {
+        nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } } } } } }
+      }
+    }
+  }
+}"#;
+
+/// The GraphQL variables for the detail query of one pull request.
+pub fn detail_variables(owner: &str, repo: &str, number: u64) -> serde_json::Value {
+    json!({ "owner": owner, "repo": repo, "number": number })
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum DetailError {
+    #[error("could not parse the pull request detail response")]
+    Parse,
+    #[error("a pull request in the detail response has an unreadable time")]
+    Timestamp,
+}
+
+#[derive(Deserialize)]
+struct DetailResponse {
+    data: DetailData,
+}
+
+#[derive(Deserialize)]
+struct DetailData {
+    repository: DetailRepository,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DetailRepository {
+    pull_request: DetailNode,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DetailNode {
+    title: String,
+    body: String,
+    state: String,
+    author: Option<Author>,
+    labels: Nodes<Label>,
+    review_requests: Nodes<ReviewRequest>,
+    review_decision: Option<String>,
+    comments: Nodes<CommentNode>,
+    review_threads: Nodes<ThreadNode>,
+    commits: Nodes<DetailCommitNode>,
+    check_runs: Nodes<CheckRunsCommitNode>,
+}
+
+#[derive(Deserialize)]
+struct Nodes<T> {
+    nodes: Vec<T>,
+}
+
+#[derive(Deserialize)]
+struct Label {
+    name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewRequest {
+    requested_reviewer: Option<Reviewer>,
+}
+
+/// A user has a login and a team a name; any other reviewer kind has neither.
+#[derive(Deserialize)]
+struct Reviewer {
+    login: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommentNode {
+    author: Option<Author>,
+    body: String,
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadNode {
+    is_resolved: bool,
+    path: String,
+    line: Option<u64>,
+    comments: Nodes<CommentNode>,
+}
+
+#[derive(Deserialize)]
+struct DetailCommitNode {
+    commit: DetailCommit,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DetailCommit {
+    oid: String,
+    message_headline: String,
+    committed_date: String,
+    author: Option<GitActor>,
+}
+
+#[derive(Deserialize)]
+struct GitActor {
+    name: Option<String>,
+    user: Option<Author>,
+}
+
+#[derive(Deserialize)]
+struct CheckRunsCommitNode {
+    commit: CheckRunsCommit,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckRunsCommit {
+    status_check_rollup: Option<ChecksRollup>,
+}
+
+#[derive(Deserialize)]
+struct ChecksRollup {
+    contexts: Nodes<CheckNode>,
+}
+
+/// A status context node carries only its type name, so every other field is optional.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckNode {
+    name: Option<String>,
+    status: Option<String>,
+    conclusion: Option<String>,
+    details_url: Option<String>,
+}
+
+const STATUS_COMPLETED: &str = "COMPLETED";
+
+fn parse_time(raw: &str) -> Result<DateTime<Utc>, DetailError> {
+    DateTime::parse_from_rfc3339(raw)
+        .map(|time| time.with_timezone(&Utc))
+        .map_err(|_| DetailError::Timestamp)
+}
+
+fn pr_state(raw: &str) -> PrState {
+    match raw {
+        "OPEN" => PrState::Open,
+        "CLOSED" => PrState::Closed,
+        "MERGED" => PrState::Merged,
+        other => PrState::Unknown(sanitize(other)),
+    }
+}
+
+fn check_run_state(raw: &str) -> CheckRunState {
+    match raw {
+        "SUCCESS" => CheckRunState::Success,
+        "FAILURE" => CheckRunState::Failure,
+        "NEUTRAL" => CheckRunState::Neutral,
+        "CANCELLED" => CheckRunState::Cancelled,
+        "SKIPPED" => CheckRunState::Skipped,
+        "TIMED_OUT" => CheckRunState::TimedOut,
+        "ACTION_REQUIRED" => CheckRunState::ActionRequired,
+        "QUEUED" => CheckRunState::Queued,
+        "IN_PROGRESS" => CheckRunState::InProgress,
+        other => CheckRunState::Unknown(sanitize(other)),
+    }
+}
+
+impl CommentNode {
+    fn into_comment(self) -> Result<Comment, DetailError> {
+        Ok(Comment {
+            author: sanitize(&login_or_ghost(self.author)),
+            body: sanitize(&self.body),
+            created_at: parse_time(&self.created_at)?,
+        })
+    }
+}
+
+fn into_comments(nodes: Nodes<CommentNode>) -> Result<Vec<Comment>, DetailError> {
+    nodes
+        .nodes
+        .into_iter()
+        .map(CommentNode::into_comment)
+        .collect()
+}
+
+impl ThreadNode {
+    fn into_thread(self) -> Result<ReviewThread, DetailError> {
+        Ok(ReviewThread {
+            path: sanitize(&self.path),
+            line: self.line,
+            is_resolved: self.is_resolved,
+            comments: into_comments(self.comments)?,
+        })
+    }
+}
+
+impl DetailCommit {
+    fn into_summary(self) -> Result<CommitSummary, DetailError> {
+        let author = self
+            .author
+            .and_then(|actor| actor.user.map(|user| user.login).or(actor.name))
+            .unwrap_or_else(|| GHOST_LOGIN.to_owned());
+        Ok(CommitSummary {
+            oid: sanitize(&self.oid),
+            headline: sanitize(&self.message_headline),
+            author: sanitize(&author),
+            date: parse_time(&self.committed_date)?,
+        })
+    }
+}
+
+impl CheckNode {
+    /// `None` for a node that is not a check run.
+    fn into_check_run(self) -> Option<CheckRun> {
+        let name = self.name?;
+        let raw = match (self.status.as_deref(), self.conclusion) {
+            (Some(STATUS_COMPLETED), Some(conclusion)) => conclusion,
+            (Some(status), _) => status.to_owned(),
+            (None, Some(conclusion)) => conclusion,
+            (None, None) => return None,
+        };
+        Some(CheckRun {
+            name: sanitize(&name),
+            state: check_run_state(&raw),
+            url: self.details_url.as_deref().map(sanitize),
+        })
+    }
+}
+
+fn into_check_runs(nodes: Nodes<CheckRunsCommitNode>) -> Vec<CheckRun> {
+    nodes
+        .nodes
+        .into_iter()
+        .filter_map(|node| node.commit.status_check_rollup)
+        .flat_map(|rollup| rollup.contexts.nodes)
+        .filter_map(CheckNode::into_check_run)
+        .collect()
+}
+
+fn reviewer_name(reviewer: Reviewer) -> Option<Remote> {
+    reviewer.login.or(reviewer.name).map(|name| sanitize(&name))
+}
+
+/// Maps the detail query response into a [`PrDetail`].
+pub fn map_detail(json: &str) -> Result<PrDetail, DetailError> {
+    let response: DetailResponse = serde_json::from_str(json).map_err(|_| DetailError::Parse)?;
+    let pr = response.data.repository.pull_request;
+    Ok(PrDetail {
+        title: sanitize(&pr.title),
+        body: sanitize(&pr.body),
+        state: pr_state(&pr.state),
+        author: sanitize(&login_or_ghost(pr.author)),
+        labels: pr
+            .labels
+            .nodes
+            .iter()
+            .map(|label| sanitize(&label.name))
+            .collect(),
+        requested_reviewers: pr
+            .review_requests
+            .nodes
+            .into_iter()
+            .filter_map(|request| request.requested_reviewer)
+            .filter_map(reviewer_name)
+            .collect(),
+        review_decision: pr.review_decision.as_deref().map(ReviewDecision::from_raw),
+        comments: into_comments(pr.comments)?,
+        threads: pr
+            .review_threads
+            .nodes
+            .into_iter()
+            .map(ThreadNode::into_thread)
+            .collect::<Result<_, _>>()?,
+        commits: pr
+            .commits
+            .nodes
+            .into_iter()
+            .map(|node| node.commit.into_summary())
+            .collect::<Result<_, _>>()?,
+        check_runs: into_check_runs(pr.check_runs),
+    })
 }
