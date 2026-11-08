@@ -51,7 +51,7 @@ pub struct FakeGh {
 impl FakeGh {
     pub fn new(script: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "forgebird-fake-gh-{}-{}",
+            "helios-fake-gh-{}-{}",
             std::process::id(),
             NEXT_DIR.fetch_add(1, Ordering::Relaxed)
         ));

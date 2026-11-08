@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Contributing to forgebird
+# Contributing to helios
 
 Thanks for helping. Keep changes small and clear.
 

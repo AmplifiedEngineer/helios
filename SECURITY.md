@@ -6,7 +6,7 @@
 
 Do not open a public GitHub issue for a security problem.
 
-Use GitHub private vulnerability reporting: [report a vulnerability](https://github.com/amplifiedengineer/forgebird/security/advisories/new).
+Use GitHub private vulnerability reporting: [report a vulnerability](https://github.com/amplifiedengineer/helios/security/advisories/new).
 
 Please include:
 

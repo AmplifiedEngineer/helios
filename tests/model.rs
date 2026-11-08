@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use forgebird::model::{CheckState, PrKey, PrSummary, ReviewDecision, Tag};
-use forgebird::remote::Remote;
-use forgebird::sanitize::sanitize;
+use helios::model::{CheckState, PrKey, PrSummary, ReviewDecision, Tag};
+use helios::remote::Remote;
+use helios::sanitize::sanitize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 

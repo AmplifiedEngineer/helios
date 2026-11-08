@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use forgebird::github::queries::{
+use helios::github::queries::{
     collect, filter_drafts, map_page, merge_needs_me, query_variables, ListError, ListKind,
     SearchPage, PAGE_SIZE, SEARCH_CAP,
 };
-use forgebird::model::{CheckState, PrSummary, ReviewDecision, Tag};
+use helios::model::{CheckState, PrSummary, ReviewDecision, Tag};
 use std::fs;
 use std::path::Path;
 
@@ -114,7 +114,7 @@ fn a_draft_is_hidden_by_default_and_shown_when_asked() {
 }
 
 /// Unknown means `None` on `PrSummary::check_state`: GitHub reported no rollup,
-/// as opposed to `Some(CheckState::Unknown(_))`, a state forgebird cannot name.
+/// as opposed to `Some(CheckState::Unknown(_))`, a state helios cannot name.
 #[test]
 fn a_missing_status_check_rollup_gives_unknown_check_state() {
     // Arrange

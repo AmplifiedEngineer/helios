@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use forgebird::sanitize::sanitize;
+use helios::sanitize::sanitize;
 
 /// Bidi marks, embeddings, isolates and line separators that `char::is_control` misses.
 const INVISIBLE_SPOOFERS: [char; 15] = [

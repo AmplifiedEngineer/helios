@@ -7,7 +7,7 @@ use std::fmt;
 /// Direct construction is a privacy error (expected code E0451):
 ///
 /// ```compile_fail,E0451
-/// use forgebird::remote::Remote;
+/// use helios::remote::Remote;
 ///
 /// let _remote = Remote { text: String::from("hello") };
 /// ```
@@ -15,7 +15,7 @@ use std::fmt;
 /// The only way to get one is `sanitize`:
 ///
 /// ```
-/// use forgebird::sanitize::sanitize;
+/// use helios::sanitize::sanitize;
 ///
 /// let remote = sanitize("hello");
 /// assert_eq!(remote.as_str(), "hello");

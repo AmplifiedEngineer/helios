@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# forgebird
+# helios
 
-forgebird is planned as a terminal UI. It will list your own pull requests and the pull requests that need you. It will work across GitHub accounts and hosts. In release 1 it will be read-only: it will never write to GitHub. None of this is built yet.
+helios is planned as a terminal UI. It will list your own pull requests and the pull requests that need you. It will work across GitHub accounts and hosts. In release 1 it will be read-only: it will never write to GitHub. None of this is built yet.
 
 ## Status
 
@@ -11,7 +11,7 @@ Release 1 is in progress. It is not released yet. The program does nothing yet. 
 ## Requirements
 
 - The GitHub CLI, `gh`, installed and logged in.
-- forgebird will take its accounts from `gh`. It will have no login of its own.
+- helios will take its accounts from `gh`. It will have no login of its own.
 
 ## Usage
 
@@ -23,7 +23,7 @@ These are planned limits of release 1.
 
 - A review request made to a team will not count. Only requests made to you will.
 - A pull request will leave Needs me once you review it. GitHub drops the request when a review is submitted.
-- Search will stop at 1000 results. forgebird will then mark the list as partial.
+- Search will stop at 1000 results. helios will then mark the list as partial.
 
 ## License
 

@@ -694,23 +694,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
-name = "forgebird"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "crossterm",
- "octocrab",
- "ratatui",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "toml",
- "yaml-rust2",
-]
-
-[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,6 +870,23 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "helios"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "crossterm",
+ "octocrab",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+ "yaml-rust2",
+]
 
 [[package]]
 name = "hex"
