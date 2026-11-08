@@ -155,8 +155,24 @@ fn is_allowed_job_write(file: &str, job: &str, scope: &str) -> bool {
         .any(|(f, j, s, _)| (*f, *j, *s) == (file, job, scope))
 }
 
+/// Every job-level write grant as (file, job, scope). Jobs without a mapping
+/// are skipped here and reported by `write_violations`.
+fn job_write_grants(workflows: &[(String, Yaml)]) -> Vec<(String, String, String)> {
+    let mut grants = Vec::new();
+    for (name, doc) in workflows {
+        for (job_id, job) in doc["jobs"].as_hash().into_iter().flatten() {
+            let job_id = job_id.as_str().unwrap_or("?");
+            for scope in write_grants(&job["permissions"]) {
+                grants.push((name.clone(), job_id.to_string(), scope));
+            }
+        }
+    }
+    grants
+}
+
 /// Returns each disallowed write grant: any top-level write, `write-all`
-/// anywhere, and job-level writes missing from `ALLOWED_JOB_WRITES`.
+/// anywhere, job-level writes missing from `ALLOWED_JOB_WRITES`, and a
+/// workflow whose jobs the check cannot read (it fails closed).
 fn write_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
     let mut violations = Vec::new();
     for (name, doc) in workflows {
@@ -165,8 +181,16 @@ fn write_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
                 .into_iter()
                 .map(|scope| format!("{name} top-level: {scope}")),
         );
-        for (job_id, job) in doc["jobs"].as_hash().into_iter().flatten() {
+        let Some(jobs) = doc["jobs"].as_hash() else {
+            violations.push(format!("{name}: no jobs mapping"));
+            continue;
+        };
+        for (job_id, job) in jobs {
             let job_id = job_id.as_str().unwrap_or("?");
+            if job.as_hash().is_none() {
+                violations.push(format!("{name} job {job_id}: not a mapping"));
+                continue;
+            }
             violations.extend(
                 write_grants(&job["permissions"])
                     .into_iter()
@@ -281,9 +305,17 @@ fn write_check_accepts_listed_job_grant_and_rejects_the_rest() {
         "lock.yml",
         "permissions:\n  contents: read\njobs:\n  lock:\n    permissions:\n      issues: write\n",
     );
-    let unlisted = docs_from(
+    let unlisted_scope = docs_from(
         "lock.yml",
         "permissions:\n  contents: read\njobs:\n  lock:\n    permissions:\n      contents: write\n",
+    );
+    let wrong_job = docs_from(
+        "lock.yml",
+        "permissions:\n  contents: read\njobs:\n  other:\n    permissions:\n      issues: write\n",
+    );
+    let wrong_file = docs_from(
+        "other.yml",
+        "permissions:\n  contents: read\njobs:\n  lock:\n    permissions:\n      issues: write\n",
     );
     let top_level = docs_from(
         "lock.yml",
@@ -293,22 +325,48 @@ fn write_check_accepts_listed_job_grant_and_rejects_the_rest() {
         "lock.yml",
         "permissions:\n  contents: read\njobs:\n  lock:\n    permissions: write-all\n",
     );
+    let no_jobs = docs_from("lock.yml", "permissions:\n  contents: read\n");
+    let job_not_a_mapping = docs_from("lock.yml", "jobs:\n  lock: nope\n");
 
     // Act
-    let listed_result = write_violations(&listed);
-    let unlisted_result = write_violations(&unlisted);
-    let top_level_result = write_violations(&top_level);
-    let write_all_result = write_violations(&write_all);
+    let results = [
+        write_violations(&listed),
+        write_violations(&unlisted_scope),
+        write_violations(&wrong_job),
+        write_violations(&wrong_file),
+        write_violations(&top_level),
+        write_violations(&write_all),
+        write_violations(&no_jobs),
+        write_violations(&job_not_a_mapping),
+    ];
+
+    // Assert
+    assert_eq!(results[0], Vec::<String>::new(), "listed grant refused");
+    assert_eq!(results[1], ["lock.yml job lock: contents"]);
+    assert_eq!(results[2], ["lock.yml job other: issues"]);
+    assert_eq!(results[3], ["other.yml job lock: issues"]);
+    assert_eq!(results[4], ["lock.yml top-level: contents"]);
+    assert_eq!(results[5], ["lock.yml job lock: write-all"]);
+    assert_eq!(results[6], ["lock.yml: no jobs mapping"]);
+    assert_eq!(results[7], ["lock.yml job lock: not a mapping"]);
+}
+
+#[test]
+fn every_allowlist_entry_matches_a_real_job_grant() {
+    // Arrange
+    let held = job_write_grants(&all_workflows());
+
+    // Act
+    let stale: Vec<_> = ALLOWED_JOB_WRITES
+        .iter()
+        .filter(|(f, j, s, _)| !held.contains(&(f.to_string(), j.to_string(), s.to_string())))
+        .collect();
 
     // Assert
     assert!(
-        listed_result.is_empty(),
-        "listed grant refused: {listed_result:?}"
+        stale.is_empty(),
+        "allowlist entries no workflow uses: {stale:?}"
     );
-    assert_eq!(unlisted_result.len(), 1, "unlisted grant accepted");
-    assert!(unlisted_result[0].contains("lock.yml") && unlisted_result[0].contains("contents"));
-    assert_eq!(top_level_result.len(), 1, "top-level write accepted");
-    assert_eq!(write_all_result.len(), 1, "write-all accepted");
 }
 
 #[test]
