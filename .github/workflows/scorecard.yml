@@ -34,7 +34,6 @@ jobs:
       # Required by scorecard-action; scoped per job rather than
       # workflow-wide so the schedule trigger doesn't inherit
       # write access on unrelated runs.
-      security-events: write # uploads the SARIF results to code scanning
       id-token: write # publishes the results to the Scorecard API
       contents: read
       actions: read # reads workflow runs for the checks
