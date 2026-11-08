@@ -101,48 +101,71 @@ const APP_TOKEN_SCOPE_PREFIX: &str = "app-token:";
 /// Triggers that run with secrets on fork-controlled input.
 const RISKY_TRIGGERS: [&str; 2] = ["pull_request_target", "workflow_run"];
 
-/// Write scopes a job requests for a GitHub App token, as `app-token:<scope>`.
+/// Scope reported for an App token step that sets no `permission-*` input,
+/// because the action then grants every permission the App installation has.
+const APP_TOKEN_ALL_SCOPE: &str = "all";
+const READ_LEVEL: &str = "read";
+
+/// Scopes a job requests for a GitHub App token, as `app-token:<scope>`.
+/// Any level other than a literal `read` counts, so expressions and `admin`
+/// fail closed.
 fn app_token_grants(job: &Yaml) -> Vec<String> {
     let mut grants = Vec::new();
     for step in job["steps"].as_vec().into_iter().flatten() {
-        if !step["uses"]
-            .as_str()
-            .unwrap_or("")
-            .starts_with(APP_TOKEN_ACTION)
-        {
+        let uses = step["uses"].as_str().unwrap_or("").to_ascii_lowercase();
+        if !uses.starts_with(APP_TOKEN_ACTION) {
             continue;
         }
+        let mut has_permission_input = false;
         for (input, level) in step["with"].as_hash().into_iter().flatten() {
-            let scope = input
+            let Some(scope) = input
                 .as_str()
-                .and_then(|name| name.strip_prefix(APP_TOKEN_INPUT_PREFIX));
-            if let (Some(scope), Some("write")) = (scope, level.as_str()) {
+                .and_then(|name| name.strip_prefix(APP_TOKEN_INPUT_PREFIX))
+            else {
+                continue;
+            };
+            has_permission_input = true;
+            if level.as_str() != Some(READ_LEVEL) {
                 grants.push(format!("{APP_TOKEN_SCOPE_PREFIX}{scope}"));
             }
+        }
+        if !has_permission_input {
+            grants.push(format!("{APP_TOKEN_SCOPE_PREFIX}{APP_TOKEN_ALL_SCOPE}"));
         }
     }
     grants
 }
 
-/// Every write scope a job holds: `permissions` writes plus App token writes.
+/// The write scopes the guard can see for a job: `permissions` writes plus App
+/// token requests. It does not see tokens that come from other secrets.
 fn job_scopes(job: &Yaml) -> Vec<String> {
     let mut scopes = write_grants(&job["permissions"]);
     scopes.extend(app_token_grants(job));
     scopes
 }
 
-/// Each workflow that triggers on an event in `RISKY_TRIGGERS`.
+/// Each workflow that triggers on an event in `RISKY_TRIGGERS`, or whose `on`
+/// key the check cannot read.
 fn risky_trigger_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
     let mut violations = Vec::new();
     for (name, doc) in workflows {
-        let events: Vec<&str> = match &doc["on"] {
-            Yaml::String(event) => vec![event.as_str()],
-            Yaml::Array(items) => items.iter().filter_map(Yaml::as_str).collect(),
-            Yaml::Hash(map) => map.keys().filter_map(Yaml::as_str).collect(),
-            _ => vec![],
+        let entries: Vec<&Yaml> = match &doc["on"] {
+            event @ Yaml::String(_) => vec![event],
+            Yaml::Array(items) => items.iter().collect(),
+            Yaml::Hash(map) => map.keys().collect(),
+            _ => {
+                violations.push(format!("{name}: no readable on trigger"));
+                continue;
+            }
         };
-        for event in events.into_iter().filter(|e| RISKY_TRIGGERS.contains(e)) {
-            violations.push(format!("{name}: {event}"));
+        for entry in entries {
+            match entry.as_str() {
+                Some(event) if RISKY_TRIGGERS.contains(&event) => {
+                    violations.push(format!("{name}: {event}"));
+                }
+                Some(_) => {}
+                None => violations.push(format!("{name}: unreadable on entry")),
+            }
         }
     }
     violations
@@ -585,4 +608,79 @@ fn no_workflow_uses_a_trigger_that_exposes_secrets_to_forks() {
 
     // Assert
     assert!(violations.is_empty(), "risky triggers: {violations:?}");
+}
+
+fn token_job(uses: &str, with: &str) -> Vec<(String, Yaml)> {
+    docs_from(
+        "other.yml",
+        &format!("jobs:\n  j:\n    steps:\n      - uses: {uses}\n{with}"),
+    )
+}
+
+#[test]
+fn app_token_check_fails_closed_on_unusual_steps() {
+    // Arrange
+    let action = "actions/create-github-app-token@abc";
+    let no_with = token_job(action, "");
+    let no_permission_inputs = token_job(action, "        with:\n          client-id: x\n");
+    let expression = token_job(
+        action,
+        "        with:\n          permission-contents: ${{ matrix.level }}\n",
+    );
+    let admin = token_job(
+        action,
+        "        with:\n          permission-members: admin\n",
+    );
+    let read_only = token_job(
+        action,
+        "        with:\n          permission-contents: read\n",
+    );
+    let upper_case = token_job(
+        "Actions/Create-GitHub-App-Token@abc",
+        "        with:\n          permission-contents: write\n",
+    );
+    let other_action = token_job(
+        "actions/checkout@abc",
+        "        with:\n          permission-contents: write\n",
+    );
+
+    // Act
+    let results = [
+        write_violations(&no_with),
+        write_violations(&no_permission_inputs),
+        write_violations(&expression),
+        write_violations(&admin),
+        write_violations(&read_only),
+        write_violations(&upper_case),
+        write_violations(&other_action),
+    ];
+
+    // Assert
+    assert_eq!(results[0], ["other.yml job j: app-token:all"]);
+    assert_eq!(results[1], ["other.yml job j: app-token:all"]);
+    assert_eq!(results[2], ["other.yml job j: app-token:contents"]);
+    assert_eq!(results[3], ["other.yml job j: app-token:members"]);
+    assert_eq!(results[4], Vec::<String>::new());
+    assert_eq!(results[5], ["other.yml job j: app-token:contents"]);
+    assert_eq!(results[6], Vec::<String>::new());
+}
+
+#[test]
+fn trigger_check_fails_closed_on_unreadable_on_key() {
+    // Arrange
+    let missing = docs_from("a.yml", "jobs: {}\n");
+    let scalar = docs_from("b.yml", "on: 5\njobs: {}\n");
+    let nested = docs_from("c.yml", "on: [push, [workflow_run]]\njobs: {}\n");
+
+    // Act
+    let results = [
+        risky_trigger_violations(&missing),
+        risky_trigger_violations(&scalar),
+        risky_trigger_violations(&nested),
+    ];
+
+    // Assert
+    assert_eq!(results[0], ["a.yml: no readable on trigger"]);
+    assert_eq!(results[1], ["b.yml: no readable on trigger"]);
+    assert_eq!(results[2], ["c.yml: unreadable on entry"]);
 }
