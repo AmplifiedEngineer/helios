@@ -15,7 +15,19 @@ Release 1 is in progress. It is not released yet. The program does nothing yet. 
 
 ## Usage
 
-Flags and keys are documented once the CLI lands.
+Run `helios --version` or `helios -V` to print the version. Other flags and keys are documented once the CLI lands.
+
+## Release
+
+A release is a version tag. The release workflow in [release.yml](.github/workflows/release.yml) does the rest.
+
+1. Open a pull request that sets `version` in `Cargo.toml` to the new version, such as `0.2.0`, and update `Cargo.lock`. Merge it.
+2. Pull the merge commit on main, then create the tag `v0.2.0` on it, with a `v` before the version, and push the tag.
+3. The workflow stops if the tag and the `Cargo.toml` version differ. Otherwise it opens a draft release and builds `helios` for macOS on Apple silicon and Intel, and for Linux on x86_64 and arm64 as static musl binaries.
+4. Each target gives `helios-<version>-<target>.tar.gz`, which holds the single `helios` binary. The workflow attests every archive, checks the archives against their attestations, then writes and attests `SHA256SUMS` and publishes the release as the latest.
+5. The Homebrew tap, `amplifiedengineer/homebrew-tap`, checks for new Helios releases every 30 minutes and opens its own bump pull request. Nothing here needs to notify it.
+
+A published release is never built again, and a tag never moves. If a build fails before publish, fix the cause and run the failed jobs again from the Actions tab. The release stays a draft until every archive passes the checks. Check a download with `gh attestation verify`, which takes the archive and the repository `amplifiedengineer/helios`.
 
 ## Known gaps
 

@@ -172,7 +172,7 @@ fn risky_trigger_violations(workflows: &[(String, Yaml)]) -> Vec<String> {
 }
 
 /// Write grants a job may hold, as (file, job, scope), each with the reason it needs it.
-const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 12] = [
+const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 19] = [
     (
         "ci-auto-rerun.yml",
         "rerun",
@@ -239,6 +239,48 @@ const ALLOWED_JOB_WRITES: [(&str, &str, &str, &str); 12] = [
         "stale",
         "pull-requests",
         "labels and closes stale pull requests",
+    ),
+    (
+        "release.yml",
+        "draft",
+        "contents",
+        "opens the draft release",
+    ),
+    (
+        "release.yml",
+        "build",
+        "contents",
+        "uploads the archive to the draft release",
+    ),
+    (
+        "release.yml",
+        "build",
+        "id-token",
+        "signs the build attestation",
+    ),
+    (
+        "release.yml",
+        "build",
+        "attestations",
+        "stores the build attestation",
+    ),
+    (
+        "release.yml",
+        "publish",
+        "contents",
+        "writes SHA256SUMS and publishes the release",
+    ),
+    (
+        "release.yml",
+        "publish",
+        "id-token",
+        "signs the sums attestation",
+    ),
+    (
+        "release.yml",
+        "publish",
+        "attestations",
+        "stores the sums attestation",
     ),
 ];
 

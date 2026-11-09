@@ -1,0 +1,319 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Helios release. Pushing a tag vX.Y.Z runs it:
+#
+#   draft    check the tag against the version in Cargo.toml and open a
+#            draft release for the tag;
+#   build    build the four targets, attest each archive and upload it to
+#            the draft;
+#   publish  check every archive against its attestation, write and attest
+#            SHA256SUMS, then publish the release as the latest.
+#
+# Four targets, each built on the host that matches it:
+#   aarch64-apple-darwin        macos-latest, native
+#   x86_64-apple-darwin         macos-latest, cross
+#   x86_64-unknown-linux-musl   ubuntu-latest, native musl-gcc and rust-lld
+#   aarch64-unknown-linux-musl  ubuntu-24.04-arm, native musl-gcc and rust-lld
+# Each target gives helios-X.Y.Z-<target>.tar.gz with the single helios binary.
+# The Homebrew tap reads these names and SHA256SUMS to write its formula.
+#
+# ring compiles C code, so both musl legs install musl-tools and still link
+# with rust-lld. `codesign --force` covers the native macOS binary, which the
+# linker already signs, and the cross built one, which comes out unsigned.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # opens the draft release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tag against Cargo.toml
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "$cargo_version" != "$version" ]; then
+            echo "::error::$TAG does not match the version $cargo_version in Cargo.toml. Nothing is released." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Open the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true ] \
+              || { echo "::error::$TAG is already published. It is never built again." >&2; exit 1; }
+            exit 0
+          fi
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" --generate-notes
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            linker: rust-lld
+            cc: musl-gcc
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            linker: rust-lld
+            cc: musl-gcc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: write # uploads the archive to the draft release
+      id-token: write # OIDC token for signing the build attestation
+      attestations: write # stores the build attestation
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        # Linux-only action; it skips itself elsewhere.
+        if: runner.os == 'Linux'
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            archive.ubuntu.com:443
+            azure.archive.ubuntu.com:80
+            crates.io:443
+            fulcio.githubapp.com:443
+            fulcio.sigstore.dev:443
+            github.com:443
+            index.crates.io:443
+            objects.githubusercontent.com:443
+            ports.ubuntu.com:80
+            rekor.sigstore.dev:443
+            release-assets.githubusercontent.com:443
+            security.ubuntu.com:443
+            static.crates.io:443
+            static.rust-lang.org:443
+            timestamp.githubapp.com:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
+            uploads.github.com:443
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the toolchain and the target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Install the musl C compiler
+        if: matrix.cc == 'musl-gcc'
+        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools
+
+      - name: Build
+        env:
+          RELEASE_LINKER: ${{ matrix.linker }}
+          RELEASE_CC: ${{ matrix.cc }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RELEASE_LINKER:-}" ]; then
+            tu="$(echo "$TARGET" | tr 'a-z-' 'A-Z_')"
+            export "CARGO_TARGET_${tu}_LINKER=${RELEASE_LINKER}"
+          fi
+          if [ -n "${RELEASE_CC:-}" ]; then
+            tc="$(echo "$TARGET" | tr '-' '_')"
+            export "CC_${tc}=${RELEASE_CC}"
+          fi
+          cargo build --release --locked --bin helios --target "$TARGET"
+
+      - name: Ad-hoc sign the macOS binary
+        if: runner.os == 'macOS'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          codesign --sign - --force "target/$TARGET/release/helios"
+          codesign -dvv "target/$TARGET/release/helios" 2>&1 | grep -q 'Signature=adhoc'
+
+      - name: Confirm the linux binary is static
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          file -b "target/$TARGET/release/helios" | grep -qE 'static-pie linked|statically linked'
+
+      - name: Name the archive
+        env:
+          VERSION: ${{ needs.draft.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          dir="target/$TARGET/release"
+          # The x86_64 macOS binary is cross built and cannot run on the
+          # arm64 runner.
+          if [ "$TARGET" != x86_64-apple-darwin ]; then
+            out="$("$dir/helios" --version)"
+            [ "$out" = "helios $VERSION" ] \
+              || { echo "::error::helios --version says '$out', not 'helios $VERSION'." >&2; exit 1; }
+          fi
+          mkdir -p dist
+          # bsdtar on macOS adds a ._name AppleDouble entry for a file with
+          # extended attributes. Keep it out.
+          export COPYFILE_DISABLE=1
+          mac_flag=""
+          if [ "$RUNNER_OS" = macOS ]; then mac_flag="--no-mac-metadata"; fi
+          archive="dist/helios-$VERSION-$TARGET.tar.gz"
+          tar $mac_flag -czf "$archive" -C "$dir" helios
+          [ "$(tar -tzf "$archive")" = helios ] \
+            || { echo "::error::$archive does not hold helios alone." >&2; exit 1; }
+          cd dist
+          if command -v shasum >/dev/null 2>&1; then shasum -a 256 ./*; else sha256sum ./*; fi
+
+      # The attestation covers the bytes this leg built. Publish checks each
+      # draft asset against it, so an asset changed in the draft is caught.
+      - name: Attest the archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - name: Upload the archive to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true ] \
+            || { echo "::error::$TAG is not a draft. Nothing is uploaded." >&2; exit 1; }
+          gh release upload "$TAG" dist/* --clobber
+
+  # SHA256SUMS, attestation and publish. The sums list every archive of the
+  # release, and the release turns public only after they are attached.
+  publish:
+    name: publish
+    needs: [draft, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # writes SHA256SUMS and publishes the release
+      id-token: write # OIDC token for signing the sums attestation
+      attestations: write # stores the sums attestation
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            fulcio.githubapp.com:443
+            fulcio.sigstore.dev:443
+            github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            rekor.sigstore.dev:443
+            timestamp.githubapp.com:443
+            tmaproduction.blob.core.windows.net:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
+            uploads.github.com:443
+
+      - name: Build SHA256SUMS from the draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.draft.outputs.version }}
+          SOURCE_REF: refs/tags/${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true ] \
+            || { echo "::error::$TAG is not a draft. Nothing is published." >&2; exit 1; }
+          mkdir -p dist && cd dist
+          gh release download "$TAG" --pattern "helios-$VERSION-*" --clobber
+          for t in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+            [ -f "helios-$VERSION-$t.tar.gz" ] \
+              || { echo "::error::helios-$VERSION-$t.tar.gz is missing. Refusing to publish a partial release." >&2; exit 1; }
+          done
+          count="$(find . -type f | wc -l | tr -d ' ')"
+          if [ "$count" -ne 4 ]; then
+            echo "::error::expected 4 archives, found $count. Refusing to publish a partial release." >&2
+            find . -type f
+            exit 1
+          fi
+          # Each archive must carry the attestation its build leg made. A
+          # fetch failure, a missing attestation and a mismatch each get their
+          # own message.
+          for f in helios-*; do
+            if ! err="$(gh attestation verify "$f" --repo "$GH_REPO" --source-ref "$SOURCE_REF" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" 2>&1 >/dev/null)"; then
+              echo "$err" >&2
+              if grep -qi 'no attestations found' <<<"$err"; then
+                echo "::error::$f has no attestation. Nothing is published." >&2
+              elif grep -qiE 'failed to fetch|HTTP [0-9]{3}|dial tcp|no such host|i/o timeout|connection (refused|reset)|deadline exceeded' <<<"$err"; then
+                echo "::error::could not fetch the attestation of $f, so it was not checked. Nothing is published." >&2
+              else
+                echo "::error::$f does not match the attestation of its build. Nothing is published." >&2
+              fi
+              exit 1
+            fi
+          done
+          sha256sum helios-* > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber
+
+      - name: Attest SHA256SUMS
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/SHA256SUMS
+
+      - name: Publish the release as the latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --latest
+          echo "Published: $(gh release view "$TAG" --json url --jq .url)" >> "$GITHUB_STEP_SUMMARY"
