@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Guards the root documentation: the files exist, their relative links resolve,
-//! and they name no CLI flag.
+//! and they name no CLI flag beyond the documented ones.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const DOCS: [&str; 4] = ["README.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md"];
+/// Long flags the CLI supports and the docs may name.
+const DOCUMENTED_FLAGS: [&str; 1] = ["--version"];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -129,15 +131,19 @@ fn relative_links_resolve() {
     );
 }
 
-// Strict until the CLI exists; a later step checks the docs against `--help` instead.
+// Strict except for the documented flags; a later step checks the docs against `--help` instead.
 #[test]
-fn docs_name_no_flag_before_the_cli_exists() {
+fn docs_name_only_documented_flags() {
     // Arrange
     let mut flags = Vec::new();
 
     // Act
     for name in DOCS {
         for entry in flags_in(&read_doc(name)) {
+            let flag = entry.split_once(": ").map_or("", |(_, flag)| flag);
+            if DOCUMENTED_FLAGS.iter().any(|known| flag.starts_with(known)) {
+                continue;
+            }
             flags.push(format!("{name}:{entry}"));
         }
     }
