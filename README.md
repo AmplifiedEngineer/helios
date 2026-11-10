@@ -2,7 +2,7 @@
 
 # helios
 
-helios is planned as a terminal UI. It will list your own pull requests and the pull requests that need you. It will work across GitHub accounts and hosts. In release 1 it will be read-only: it will never write to GitHub. None of this is built yet.
+helios is planned as a terminal UI. It will list your own pull requests and the pull requests that need you. It will work across GitHub accounts and hosts. In release 1 it will be read-only: it will never write to GitHub. See Status for what works today.
 
 ## Status
 

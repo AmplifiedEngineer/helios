@@ -226,11 +226,18 @@ impl Octo {
         let mut items = Vec::new();
         let mut next = Some(path.to_string());
         let mut seen = HashSet::new();
+        let mut client = self.client()?;
         while let Some(current) = next {
             if seen.len() >= MAX_PAGES || !seen.insert(current.clone()) {
                 return Err(GithubError::Decode);
             }
-            let (page, link) = self.get_page(&current).await?;
+            let (page, link) = match self.get_page_once(&client, &current).await {
+                Err(GithubError::AuthRequired) => {
+                    client = self.client()?;
+                    self.get_page_once(&client, &current).await?
+                }
+                other => other?,
+            };
             items.extend(page);
             next = match link {
                 Some(value) => next_path(&value, &self.base_uri)?,
@@ -240,16 +247,8 @@ impl Octo {
         Ok(items)
     }
 
-    /// Fetches one page. A 401 re-fetches the token and retries once.
-    async fn get_page(&self, path: &str) -> Result<Page, GithubError> {
-        match self.get_page_once(path).await {
-            Err(GithubError::AuthRequired) => self.get_page_once(path).await,
-            other => other,
-        }
-    }
-
-    async fn get_page_once(&self, path: &str) -> Result<Page, GithubError> {
-        let client = self.client()?;
+    /// Fetches one page with `client`, which carries the token for the whole walk.
+    async fn get_page_once(&self, client: &Octocrab, path: &str) -> Result<Page, GithubError> {
         let response = client._get(path).await.map_err(transport_error)?;
         let checked = check_status(response.status().as_u16(), |name| {
             response.headers().get(name)
