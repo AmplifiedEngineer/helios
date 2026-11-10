@@ -6,6 +6,7 @@ use crate::github::errors::GithubError;
 use crate::model::{PrDetail, PrKey, PrSummary};
 use worker::Loaded;
 
+pub mod refresh;
 pub mod worker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
