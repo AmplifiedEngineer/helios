@@ -8,3 +8,4 @@ pub mod proc;
 pub mod remote;
 pub mod sanitize;
 pub mod secret;
+pub mod tui;
