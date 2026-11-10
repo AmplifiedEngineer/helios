@@ -1,0 +1,14 @@
+[Mine]  Needs me
+HOST       REPO       #      TITLE            AUTHOR       TAG      DRAFT REVIEW   CHECKS   UPDATED
+github.com org/repo   #1     First change     octo                                          2h
+github.com org/repo   #2     Second change    octo                                          2h
+
+
+
+
+
+
+
+
+j/k move  g/G first/last  Enter open  m mine/needs me  r refresh  d toggle drafts  ? help  q quit
+Ctrl-C quit
