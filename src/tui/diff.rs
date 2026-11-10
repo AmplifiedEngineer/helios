@@ -122,7 +122,7 @@ impl LineNumbers {
 /// Returns the counter's current value and advances it.
 fn take(counter: &mut u32) -> u32 {
     let number = *counter;
-    *counter += 1;
+    *counter = counter.saturating_add(1);
     number
 }
 

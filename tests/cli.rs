@@ -308,3 +308,42 @@ fn smoke_through_the_binary_never_prints_a_token_when_gh_fails() {
         "the smoke run reports the gh failure: {stderr}"
     );
 }
+
+#[test]
+fn a_bad_refresh_env_value_is_ignored_when_the_flag_is_given() {
+    // Arrange
+    let environment = env(&[("HELIOS_REFRESH_SECS", "abc")]);
+
+    // Act
+    let flagged = cli::parse(&args(&[REFRESH_FLAG, "60"]), &environment);
+    let helped = cli::parse(&args(&["--help"]), &environment);
+    let bare = cli::parse(&args(&[]), &environment);
+
+    // Assert
+    assert_eq!(flagged.map(|c| c.refresh_secs), Ok(60));
+    assert!(helped.is_ok(), "--help must not trip over the env value");
+    assert!(bare.is_err(), "a bad env value alone is still an error");
+}
+
+#[test]
+fn a_flag_is_never_taken_as_the_value_of_the_flag_before_it() {
+    // Arrange
+    let cases = [
+        (
+            vec!["--hosts", "--smoke"],
+            cli::CliError::MissingValue("--hosts"),
+        ),
+        (
+            vec!["--refresh-secs", "--drafts"],
+            cli::CliError::MissingValue("--refresh-secs"),
+        ),
+    ];
+
+    for (input, expected) in cases {
+        // Act
+        let result = cli::parse(&args(&input), &env(&[]));
+
+        // Assert
+        assert_eq!(result, Err(expected), "{input:?}");
+    }
+}
