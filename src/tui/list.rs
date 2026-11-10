@@ -4,6 +4,7 @@
 
 use std::time::SystemTime;
 
+use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::widgets::{Paragraph, Row, Table};
 use ratatui::Frame;
@@ -57,7 +58,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, by_t
 }
 
 /// A fixed message per failure kind, so no text from GitHub reaches the screen.
-fn failure_message(error: &GithubError) -> &'static str {
+pub(crate) fn failure_message(error: &GithubError) -> &'static str {
     match error {
         GithubError::AuthRequired => "GitHub rejected the credentials",
         GithubError::PermissionDenied => "the token is not allowed to do this",
@@ -90,7 +91,7 @@ fn table_row(row: &PrSummary, now: SystemTime) -> Row<'static> {
         if row.is_draft { DRAFT_MARK } else { "" }.into(),
         decision_text(row.review_decision.as_ref()),
         checks_text(row.check_state.as_ref()),
-        age_text(row, now),
+        age_since(row.updated_at, now),
     ])
 }
 
@@ -127,11 +128,10 @@ fn checks_text(state: Option<&CheckState>) -> String {
     }
 }
 
-/// How long ago the row changed, as the largest whole unit.
-fn age_text(row: &PrSummary, now: SystemTime) -> String {
-    let updated = SystemTime::from(row.updated_at);
+/// How long before `now` the instant was, as the largest whole unit.
+pub(crate) fn age_since(instant: DateTime<Utc>, now: SystemTime) -> String {
     let seconds = now
-        .duration_since(updated)
+        .duration_since(SystemTime::from(instant))
         .map_or(0, |elapsed| elapsed.as_secs());
     match seconds {
         s if s >= SECONDS_PER_DAY => format!("{}d", s / SECONDS_PER_DAY),
