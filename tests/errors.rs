@@ -12,18 +12,13 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use helios::accounts::{Account, AccountState};
 use helios::github::errors::GithubError;
 use helios::github::octo::{
     GraphqlResponse, Octo, TokenSource, DEFAULT_BASE_URI, DEFAULT_RATE_LIMIT_BACKOFF, ENDPOINTS,
 };
 use helios::secret::Secret;
+use support::github::{account, planted_token, FixedToken};
 use support::server::{ScriptedResponse, TestServer};
-
-/// Planted token, built at runtime so no token-shaped literal sits in the source.
-fn planted_token() -> String {
-    format!("{}_{}", "tok", "planted")
-}
 
 const QUERY: &str = "{ viewer { login } }";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -48,24 +43,6 @@ const RESET_EPOCH_SECS: u64 = 2_000_000_000;
 const RETRY_AFTER_SECS: u64 = 120;
 /// Differs from the reset time, so a test shows which header won.
 const REQUEST_ID: &str = "ABCD:1234:5678";
-
-struct FixedToken(String);
-
-impl TokenSource for FixedToken {
-    fn fetch(&self) -> Result<Secret, GithubError> {
-        Ok(Secret::new(self.0.clone()))
-    }
-}
-
-fn account() -> Account {
-    Account {
-        host: "github.test".into(),
-        login: "octo".into(),
-        active: true,
-        scopes: vec![],
-        state: AccountState::Success,
-    }
-}
 
 async fn call(response: ScriptedResponse) -> Result<GraphqlResponse, GithubError> {
     let server = TestServer::start(response);

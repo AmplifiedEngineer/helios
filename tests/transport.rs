@@ -11,10 +11,9 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use helios::accounts::{Account, AccountState};
 use helios::github::errors::GithubError;
-use helios::github::octo::{Octo, TokenSource, MAX_PAGES};
-use helios::secret::Secret;
+use helios::github::octo::{Octo, MAX_PAGES};
+use support::github::{account, planted_token, FixedToken};
 use support::server::{RecordedRequest, ScriptedResponse, TestServer};
 
 const QUERY: &str = "{ viewer { login } }";
@@ -24,29 +23,6 @@ const RESET_EPOCH_SECS: u64 = 4_000_000_000;
 const RETRY_AFTER_SECS: u64 = 120;
 const CLOCK_SLACK: Duration = Duration::from_secs(5);
 const REDIRECT_STATUS: u16 = 302;
-
-/// Planted token, built at runtime so no token-shaped literal sits in the source.
-fn planted_token() -> String {
-    format!("{}_{}", "tok", "planted")
-}
-
-struct FixedToken(String);
-
-impl TokenSource for FixedToken {
-    fn fetch(&self) -> Result<Secret, GithubError> {
-        Ok(Secret::new(self.0.clone()))
-    }
-}
-
-fn account() -> Account {
-    Account {
-        host: "github.test".into(),
-        login: "octo".into(),
-        active: true,
-        scopes: vec![],
-        state: AccountState::Success,
-    }
-}
 
 /// Sends one raw request carrying a planted `Authorization` header.
 fn send_with_authorization(server: &TestServer) {
@@ -433,5 +409,39 @@ async fn a_ghes_base_posts_graphql_to_api_graphql_and_reads_rest_under_api_v3() 
     assert_eq!(
         paths(&server.requests()),
         vec!["/api/graphql", "/api/v3/items"]
+    );
+}
+
+#[tokio::test]
+async fn ghes_paging_follows_an_absolute_link_under_api_v3() {
+    // Arrange
+    let server = TestServer::start_with(|request| match request.path.as_str() {
+        "/api/v3/items?page=1" => {
+            let target = format!(
+                "http://{}/api/v3/items?page=2",
+                request.header("Host").unwrap_or("")
+            );
+            ScriptedResponse::json(200, "[1]").with_header("Link", &link_to(&target))
+        }
+        "/api/v3/items?page=2" => ScriptedResponse::json(200, "[2]"),
+        _ => ScriptedResponse::json(404, "{}"),
+    });
+    let token = Arc::new(FixedToken(planted_token()));
+    let octo = Octo::new(
+        &account(),
+        &format!("{}/api/v3", server.origin()),
+        REQUEST_TIMEOUT,
+        token,
+    )
+    .expect("client builds");
+
+    // Act
+    let items = octo.get_pages("/items?page=1").await;
+
+    // Assert
+    assert_eq!(items.expect("both pages are read").len(), 2);
+    assert_eq!(
+        paths(&server.requests()),
+        vec!["/api/v3/items?page=1", "/api/v3/items?page=2"]
     );
 }

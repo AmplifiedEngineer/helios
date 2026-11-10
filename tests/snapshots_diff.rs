@@ -13,6 +13,7 @@ use serde_json::json;
 
 #[allow(dead_code)]
 mod support;
+use support::render::{buffer_text as screen_text, line_with};
 use support::snapshot::assert_snapshot;
 
 const SCREEN_WIDTH: u16 = 80;
@@ -58,17 +59,6 @@ fn draw(file: &ChangedFile, color: bool, height: u16) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
-fn screen_text(buffer: &Buffer) -> String {
-    buffer
-        .content()
-        .chunks(usize::from(buffer.area.width))
-        .map(|row| {
-            let line: String = row.iter().map(|cell| cell.symbol()).collect();
-            format!("{}\n", line.trim_end())
-        })
-        .collect()
-}
-
 /// The cells of the first row holding `needle`, from the needle's first column.
 fn cells_of<'a>(buffer: &'a Buffer, needle: &str) -> (usize, &'a [ratatui::buffer::Cell]) {
     let width = usize::from(buffer.area.width);
@@ -80,13 +70,6 @@ fn cells_of<'a>(buffer: &'a Buffer, needle: &str) -> (usize, &'a [ratatui::buffe
             line.find(needle).map(|column| (column, row))
         })
         .unwrap_or_else(|| panic!("no row holds {needle:?}:\n{}", screen_text(buffer)))
-}
-
-fn line_with<'a>(screen: &'a str, needle: &str) -> &'a str {
-    screen
-        .lines()
-        .find(|line| line.contains(needle))
-        .unwrap_or_else(|| panic!("no line holds {needle:?}:\n{screen}"))
 }
 
 #[test]
@@ -218,8 +201,49 @@ fn a_hunk_header_at_the_largest_line_number_does_not_overflow() {
     let file = patch_file(patch);
 
     // Act
-    let buffer = draw(&file, false, SCREEN_HEIGHT);
+    let screen = screen_text(&draw(&file, false, SCREEN_HEIGHT));
+
+    // Assert: both context rows keep the largest number; a wrapped counter would show 0
+    let rows: Vec<&str> = screen.lines().filter(|l| l.contains("context")).collect();
+    assert_eq!(rows.len(), 2, "{screen}");
+    assert!(
+        rows.iter().all(|row| row.contains("4294967295")),
+        "{screen}"
+    );
+    assert!(!screen.contains(" 0 "), "{screen}");
+}
+
+#[test]
+fn a_patch_of_exactly_the_line_cap_has_no_cut_line() {
+    // Arrange: one header and enough context rows to reach the cap exactly
+    let rows = "\n context".repeat(MAX_DIFF_LINES - 1);
+    let patch = format!("@@ -1,{0} +1,{0} @@{rows}", MAX_DIFF_LINES - 1);
+    let file = patch_file(&patch);
+
+    // Act
+    let screen = screen_text(&draw(&file, false, TALL_HEIGHT));
 
     // Assert
-    assert!(format!("{buffer:?}").contains("4294967295"));
+    assert!(!screen.contains(CUT_LINE), "a full patch was cut");
+    assert_eq!(screen.matches("context").count(), MAX_DIFF_LINES - 1);
+}
+
+#[test]
+fn a_second_hunk_restarts_the_gutters_after_a_no_newline_line() {
+    // Arrange
+    let patch = "@@ -1,2 +1,2 @@\n keep\n-old\n+new\n\\ No newline at end of file\n@@ -40,1 +50,1 @@\n tail";
+    let file = patch_file(patch);
+
+    // Act
+    let screen = screen_text(&draw(&file, false, SCREEN_HEIGHT));
+
+    // Assert
+    assert!(line_with(&screen, "keep").contains(" 1    1 "), "{screen}");
+    let marker = line_with(&screen, "No newline");
+    assert!(
+        marker.trim_start().starts_with("\\ No newline"),
+        "{marker:?}"
+    );
+    let tail = line_with(&screen, "tail");
+    assert!(tail.contains(" 40   50 "), "{tail:?}");
 }

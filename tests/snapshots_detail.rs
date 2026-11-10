@@ -16,6 +16,7 @@ use std::time::SystemTime;
 
 #[allow(dead_code)]
 mod support;
+use support::render::{buffer_text, line_with};
 use support::snapshot::assert_snapshot;
 
 const HOST: &str = "github.com";
@@ -71,29 +72,13 @@ fn render_detail(app: &App) -> String {
     terminal
         .draw(|frame| detail::render(frame, frame.area(), app, &FixedClock))
         .expect("draw");
-    terminal
-        .backend()
-        .buffer()
-        .content()
-        .chunks(usize::from(SCREEN_WIDTH))
-        .map(|row| {
-            let line: String = row.iter().map(|cell| cell.symbol()).collect();
-            format!("{}\n", line.trim_end())
-        })
-        .collect()
+    buffer_text(terminal.backend().buffer())
 }
 
 fn position(screen: &str, needle: &str) -> usize {
     screen
         .find(needle)
         .unwrap_or_else(|| panic!("the screen lacks {needle:?}:\n{screen}"))
-}
-
-fn line_with<'a>(screen: &'a str, needle: &str) -> &'a str {
-    screen
-        .lines()
-        .find(|line| line.contains(needle))
-        .unwrap_or_else(|| panic!("no line holds {needle:?}:\n{screen}"))
 }
 
 #[test]
