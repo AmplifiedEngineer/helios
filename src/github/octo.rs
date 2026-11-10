@@ -88,9 +88,29 @@ const STATUS_NOT_FOUND: u16 = 404;
 const STATUS_TOO_MANY_REQUESTS: u16 = 429;
 const GRAPHQL_FORBIDDEN: &str = "FORBIDDEN";
 const GRAPHQL_RATE_LIMITED: &str = "RATE_LIMITED";
+const GRAPHQL_NOT_FOUND: &str = "NOT_FOUND";
+/// Text, in lowercase, that marks a SAML single sign-on refusal.
+const SAML_TEXT: &str = "saml";
+/// Text, in lowercase, of GitHub's secondary rate limit refusal.
+const SECONDARY_RATE_LIMIT_TEXT: &str = "secondary rate limit";
 
 /// Base URI of github.com's API.
 pub const DEFAULT_BASE_URI: &str = "https://api.github.com";
+const GITHUB_COM: &str = "github.com";
+/// Host suffix of GHE.com data residency tenants, whose API sits on an `api.` host.
+const GHE_COM_SUFFIX: &str = ".ghe.com";
+const GHE_COM_API_PREFIX: &str = "api.";
+
+/// The base URI of the REST and GraphQL API for `host`.
+pub fn api_base(host: &str) -> String {
+    if host == GITHUB_COM {
+        DEFAULT_BASE_URI.to_string()
+    } else if host.ends_with(GHE_COM_SUFFIX) {
+        format!("https://{GHE_COM_API_PREFIX}{host}")
+    } else {
+        format!("https://{host}/api{GHES_REST_SUFFIX}")
+    }
+}
 
 /// Every path the client requests, relative to the base URI.
 pub const ENDPOINTS: &[&str] = &[GRAPHQL_PATH, FILES_PATH_TEMPLATE];
@@ -174,9 +194,18 @@ impl Octo {
             ._post(GRAPHQL_PATH, Some(&payload))
             .await
             .map_err(transport_error)?;
-        let (_, signals) = check_status(response.status().as_u16(), |name| {
+        let checked = check_status(response.status().as_u16(), |name| {
             response.headers().get(name)
-        })?;
+        });
+        let (_, signals) = match checked {
+            Err(GithubError::PermissionDenied) => {
+                let retry_at =
+                    Signals::read(header_text(|name| response.headers().get(name))).retry_at();
+                let body = client.body_to_string(response).await.unwrap_or_default();
+                return Err(forbidden_body(&body, retry_at));
+            }
+            other => other?,
+        };
         let body = client
             .body_to_string(response)
             .await
@@ -222,9 +251,18 @@ impl Octo {
     async fn get_page_once(&self, path: &str) -> Result<Page, GithubError> {
         let client = self.client()?;
         let response = client._get(path).await.map_err(transport_error)?;
-        let (link, _) = check_status(response.status().as_u16(), |name| {
+        let checked = check_status(response.status().as_u16(), |name| {
             response.headers().get(name)
-        })?;
+        });
+        let (link, _) = match checked {
+            Err(GithubError::PermissionDenied) => {
+                let retry_at =
+                    Signals::read(header_text(|name| response.headers().get(name))).retry_at();
+                let body = client.body_to_string(response).await.unwrap_or_default();
+                return Err(forbidden_body(&body, retry_at));
+            }
+            other => other?,
+        };
         let body = client
             .body_to_string(response)
             .await
@@ -266,15 +304,16 @@ impl Octo {
         &self,
         query: &str,
         variables: &serde_json::Value,
-    ) -> Result<String, GithubError> {
+    ) -> Result<(String, Vec<GraphqlError>), GithubError> {
         let response = self.graphql_with(query, variables).await?;
         let data = response.data.ok_or(GithubError::Decode)?;
-        let errors: Vec<_> = response
+        let messages: Vec<_> = response
             .errors
             .iter()
             .map(|error| serde_json::json!({ "message": error.message }))
             .collect();
-        Ok(serde_json::json!({ "data": data, "errors": errors }).to_string())
+        let body = serde_json::json!({ "data": data, "errors": messages }).to_string();
+        Ok((body, response.errors))
     }
 }
 
@@ -283,7 +322,7 @@ impl GithubApi for Octo {
         let mut pager = Pager::default();
         loop {
             let variables = query_variables(kind, pager.cursor());
-            let body = self.graphql_body(LIST_QUERY, &variables).await?;
+            let (body, _) = self.graphql_body(LIST_QUERY, &variables).await?;
             let page = map_page(&self.host, &self.login, &body).map_err(|_| GithubError::Decode)?;
             if !pager.push(page) {
                 return Ok(pager.finish().rows);
@@ -293,8 +332,8 @@ impl GithubApi for Octo {
 
     async fn detail(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetail, GithubError> {
         let variables = detail_variables(owner, repo, number);
-        let body = self.graphql_body(DETAIL_QUERY, &variables).await?;
-        map_detail(&body).map_err(|_| GithubError::Decode)
+        let (body, errors) = self.graphql_body(DETAIL_QUERY, &variables).await?;
+        map_detail(&body).map_err(|_| classify_errors(&errors).unwrap_or(GithubError::Decode))
     }
 
     async fn files(
@@ -410,11 +449,13 @@ impl Signals {
 
     /// `Retry-After` wins over the reset time, then the default backoff applies.
     fn retry_at(&self) -> SystemTime {
-        match (self.retry_after, self.reset) {
-            (Some(wait), _) => SystemTime::now() + Duration::from_secs(wait),
-            (None, Some(reset)) => UNIX_EPOCH + Duration::from_secs(reset),
-            (None, None) => SystemTime::now() + DEFAULT_RATE_LIMIT_BACKOFF,
-        }
+        let default = SystemTime::now() + DEFAULT_RATE_LIMIT_BACKOFF;
+        let wanted = match (self.retry_after, self.reset) {
+            (Some(wait), _) => SystemTime::now().checked_add(Duration::from_secs(wait)),
+            (None, Some(reset)) => UNIX_EPOCH.checked_add(Duration::from_secs(reset)),
+            (None, None) => None,
+        };
+        wanted.unwrap_or(default)
     }
 
     fn rate_limited(&self) -> bool {
@@ -425,8 +466,16 @@ impl Signals {
 fn envelope(raw: RawGraphqlResponse, signals: &Signals) -> Result<GraphqlResponse, GithubError> {
     if raw.data.is_none() {
         let has = |kind: &str| raw.errors.iter().any(|e| e.kind.as_deref() == Some(kind));
-        if has(GRAPHQL_FORBIDDEN) {
-            return Err(GithubError::SsoBlocked);
+        if let Some(error) = raw
+            .errors
+            .iter()
+            .find(|e| e.kind.as_deref() == Some(GRAPHQL_FORBIDDEN))
+        {
+            return Err(if signals.sso {
+                GithubError::SsoBlocked
+            } else {
+                forbidden(&error.message)
+            });
         }
         if has(GRAPHQL_RATE_LIMITED) {
             return Err(GithubError::RateLimited {
@@ -444,6 +493,34 @@ fn envelope(raw: RawGraphqlResponse, signals: &Signals) -> Result<GraphqlRespons
                 kind: e.kind,
             })
             .collect(),
+    })
+}
+
+/// SSO when the message names SAML enforcement, otherwise a plain permission failure.
+fn forbidden(message: &str) -> GithubError {
+    if message.to_lowercase().contains(SAML_TEXT) {
+        GithubError::SsoBlocked
+    } else {
+        GithubError::PermissionDenied
+    }
+}
+
+/// The error a 403 without headers stands for, read from its body.
+fn forbidden_body(body: &str, retry_at: SystemTime) -> GithubError {
+    if body.to_lowercase().contains(SECONDARY_RATE_LIMIT_TEXT) {
+        GithubError::RateLimited { retry_at }
+    } else {
+        forbidden(body)
+    }
+}
+
+/// The error GraphQL error types stand for when the data has a null where a
+/// value was needed.
+fn classify_errors(errors: &[GraphqlError]) -> Option<GithubError> {
+    errors.iter().find_map(|error| match error.kind.as_deref() {
+        Some(GRAPHQL_NOT_FOUND) => Some(GithubError::NotFoundOrHidden),
+        Some(GRAPHQL_FORBIDDEN) => Some(forbidden(&error.message)),
+        _ => None,
     })
 }
 

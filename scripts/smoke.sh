@@ -22,4 +22,4 @@ if [ -n "${HELIOS_BIN:-}" ]; then
     exec "$HELIOS_BIN" --smoke
 fi
 
-exec cargo run --quiet -- --smoke
+exec cargo run --quiet --manifest-path "$(dirname "$0")/../Cargo.toml" -- --smoke

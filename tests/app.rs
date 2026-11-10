@@ -122,3 +122,149 @@ fn a_vanished_pr_keeps_its_row_until_the_next_list_refresh() {
     // Assert
     assert_eq!(numbers(&app), vec![1]);
 }
+
+const OTHER_HOST: &str = "ghe.example.com";
+const OTHER_ACCOUNT: &str = "hubot";
+
+fn summary_for(host: &str, account: &str, number: u64) -> PrSummary {
+    let mut row = summary(number);
+    row.key.host = host.into();
+    row.key.account = account.into();
+    row
+}
+
+fn loaded_for(generation: u64, host: &str, account: &str, numbers: &[u64]) -> Loaded {
+    Loaded {
+        generation,
+        host: host.into(),
+        account: account.into(),
+        result: Ok(numbers
+            .iter()
+            .map(|n| summary_for(host, account, *n))
+            .collect()),
+    }
+}
+
+#[test]
+fn two_accounts_loaded_in_one_refresh_both_keep_their_rows() {
+    // Arrange
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+
+    // Act
+    app.apply(loaded_for(generation, HOST, ACCOUNT, &[1, 2]));
+    app.apply(loaded_for(generation, OTHER_HOST, OTHER_ACCOUNT, &[3]));
+
+    // Assert
+    let mut found: Vec<(String, u64)> = app
+        .rows()
+        .iter()
+        .map(|row| (row.key.host.clone(), row.key.number))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        vec![
+            (OTHER_HOST.to_string(), 3),
+            (HOST.to_string(), 1),
+            (HOST.to_string(), 2)
+        ]
+    );
+}
+
+#[test]
+fn a_later_load_replaces_only_its_own_accounts_rows() {
+    // Arrange
+    let mut app = App::new();
+    let first = app.begin_refresh();
+    app.apply(loaded_for(first, HOST, ACCOUNT, &[1, 2]));
+    app.apply(loaded_for(first, OTHER_HOST, OTHER_ACCOUNT, &[3]));
+    let second = app.begin_refresh();
+
+    // Act
+    app.apply(loaded_for(second, HOST, ACCOUNT, &[2]));
+
+    // Assert
+    let mut numbers: Vec<u64> = app.rows().iter().map(|row| row.key.number).collect();
+    numbers.sort_unstable();
+    assert_eq!(numbers, vec![2, 3]);
+}
+
+#[test]
+fn a_good_load_clears_only_its_own_accounts_failure() {
+    // Arrange
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    for account in [ACCOUNT, OTHER_ACCOUNT] {
+        app.apply(Loaded {
+            generation,
+            host: HOST.into(),
+            account: account.into(),
+            result: Err(GithubError::Network),
+        });
+    }
+
+    // Act
+    app.apply(loaded_for(generation, HOST, ACCOUNT, &[1]));
+
+    // Assert
+    let failed: Vec<&str> = app
+        .host_failures()
+        .keys()
+        .map(|(_, account)| account.as_str())
+        .collect();
+    assert_eq!(failed, vec![OTHER_ACCOUNT]);
+}
+
+#[test]
+fn a_host_that_failed_and_then_loaded_shows_no_failure() {
+    // Arrange
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    app.apply(Loaded {
+        generation,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Err(GithubError::Network),
+    });
+
+    // Act
+    let next = app.begin_refresh();
+    app.apply(loaded_for(next, HOST, ACCOUNT, &[1]));
+
+    // Assert
+    assert!(app.host_failures().is_empty());
+}
+
+#[test]
+fn a_selection_that_moves_on_refresh_drops_the_old_detail_and_files() {
+    // Arrange
+    let mut app = app_with_rows(&[1, 2, 3]);
+    app.select(key(2));
+    app.apply_detail(&key(2), Err(GithubError::Network));
+    app.apply_files(&key(2), Vec::new());
+    let generation = app.begin_refresh();
+
+    // Act
+    app.apply(loaded(generation, &[1, 3]));
+
+    // Assert
+    assert!(matches!(app.detail(), DetailState::Loading));
+    assert!(app.files().is_none());
+}
+
+#[test]
+fn a_detail_result_for_a_pr_that_is_no_longer_selected_is_dropped() {
+    // Arrange
+    let mut app = app_with_rows(&[1, 2]);
+    app.select(key(1));
+    app.select(key(2));
+
+    // Act
+    app.apply_detail(&key(1), Err(GithubError::Network));
+    app.apply_files(&key(1), Vec::new());
+
+    // Assert
+    assert!(matches!(app.detail(), DetailState::Loading));
+    assert!(app.files().is_none());
+}

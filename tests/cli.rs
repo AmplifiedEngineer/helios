@@ -347,3 +347,20 @@ fn a_flag_is_never_taken_as_the_value_of_the_flag_before_it() {
         assert_eq!(result, Err(expected), "{input:?}");
     }
 }
+
+#[test]
+fn an_empty_host_list_includes_every_host_and_a_set_list_only_its_hosts() {
+    // Arrange
+    let all = cli::parse(&args(&[]), &env(&[])).expect("defaults parse");
+    let one = cli::parse(&args(&["--hosts", "ghe.example.com"]), &env(&[])).expect("flag parses");
+
+    // Act
+    let results = [
+        all.includes_host("github.com"),
+        one.includes_host("github.com"),
+        one.includes_host("ghe.example.com"),
+    ];
+
+    // Assert
+    assert_eq!(results, [true, false, true]);
+}

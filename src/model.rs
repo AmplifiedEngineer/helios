@@ -95,7 +95,8 @@ pub enum DiffGap {
     Binary,
     /// The file was renamed with no content change.
     RenamedOnly,
-    /// The file is new and empty.
+    /// No patch and no changes: an empty or binary file that was added or removed, or a mode-only
+    /// change. The REST entry cannot tell these apart.
     Empty,
 }
 
@@ -194,4 +195,6 @@ pub struct PrDetail {
     pub threads: Vec<ReviewThread>,
     pub commits: Vec<CommitSummary>,
     pub check_runs: Vec<CheckRun>,
+    /// GitHub holds more comments, threads, commits or checks than were fetched.
+    pub partial: bool,
 }

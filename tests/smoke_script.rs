@@ -2,6 +2,8 @@
 
 //! The manual smoke script, run against a fake `gh` and the real binary.
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -88,4 +90,48 @@ fn smoke_script_prints_no_token() {
     assert!(!stdout.contains(&token), "stdout: {stdout}");
     assert!(!stderr.contains(&token), "stderr: {stderr}");
     assert!(stderr.contains(GH_FAILURE_MESSAGE), "stderr: {stderr}");
+}
+
+const EXECUTABLE_MODE: u32 = 0o755;
+const MANIFEST_FLAG: &str = "--manifest-path";
+
+#[test]
+fn smoke_script_points_cargo_at_this_repo_from_any_directory() {
+    // Arrange
+    let gh = FakeGh::new(NO_ACCOUNTS_JSON);
+    let dir = std::env::temp_dir().join(format!("helios-fake-cargo-{}", std::process::id()));
+    fs::create_dir_all(&dir).expect("create the fake cargo dir");
+    let record = dir.join("args.txt");
+    let cargo = dir.join("cargo");
+    fs::write(
+        &cargo,
+        format!("#!/bin/sh\necho \"$@\" > {}\n", record.display()),
+    )
+    .expect("write the fake cargo");
+    fs::set_permissions(&cargo, fs::Permissions::from_mode(EXECUTABLE_MODE)).expect("chmod");
+
+    // Act
+    let status = Command::new("/bin/sh")
+        .arg(script())
+        .env_clear()
+        .env("PATH", format!("{}:{SYSTEM_PATH}", dir.display()))
+        .env(GH_ENV, &gh.path)
+        .current_dir(&dir)
+        .stdin(Stdio::null())
+        .status()
+        .expect("smoke script runs");
+
+    // Assert
+    let args = fs::read_to_string(&record).expect("the fake cargo was called");
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let _ = fs::remove_dir_all(&dir);
+    assert!(status.success());
+    assert!(args.contains(MANIFEST_FLAG), "args: {args}");
+    assert!(
+        args.contains(&format!(
+            "{}/scripts/../Cargo.toml",
+            env!("CARGO_MANIFEST_DIR")
+        )) && manifest.exists(),
+        "args: {args}"
+    );
 }

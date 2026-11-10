@@ -47,7 +47,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, by_t
     let failures: Vec<String> = app
         .host_failures()
         .iter()
-        .map(|(host, error)| format!("{}: {}", sanitize(host), failure_message(error)))
+        .map(|((host, _), error)| format!("{}: {}", sanitize(host), failure_message(error)))
         .collect();
     let failure_height = u16::try_from(failures.len()).unwrap_or(u16::MAX);
     let [table_area, failure_area] =
