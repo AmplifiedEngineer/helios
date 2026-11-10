@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Guards the root documentation: the files exist, their relative links resolve,
-//! and they name no CLI flag beyond the documented ones.
+//! and they name only flags the CLI defines.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const DOCS: [&str; 4] = ["README.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md"];
-/// Long flags the CLI supports and the docs may name.
-const DOCUMENTED_FLAGS: [&str; 1] = ["--version"];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -91,6 +89,19 @@ fn flags_in(text: &str) -> Vec<String> {
     found
 }
 
+/// The flag names in `text`, without line numbers or trailing text.
+fn flag_names(text: &str) -> Vec<String> {
+    flags_in(text)
+        .iter()
+        .filter_map(|entry| entry.split_once(": ").map(|(_, rest)| rest))
+        .map(|rest| {
+            rest.chars()
+                .take_while(|c| *c == '-' || c.is_ascii_lowercase())
+                .collect()
+        })
+        .collect()
+}
+
 fn read_doc(name: &str) -> String {
     fs::read_to_string(root().join(name)).unwrap_or_else(|e| panic!("cannot read {name}: {e}"))
 }
@@ -131,28 +142,27 @@ fn relative_links_resolve() {
     );
 }
 
-// Strict except for the documented flags; a later step checks the docs against `--help` instead.
 #[test]
-fn docs_name_only_documented_flags() {
+fn docs_name_only_flags_the_cli_defines() {
     // Arrange
-    let mut flags = Vec::new();
+    let help = helios::cli::help();
+    let defined: Vec<String> = flag_names(&help);
+    let mut unknown = Vec::new();
 
     // Act
     for name in DOCS {
-        for entry in flags_in(&read_doc(name)) {
-            let flag = entry.split_once(": ").map_or("", |(_, flag)| flag);
-            if DOCUMENTED_FLAGS.iter().any(|known| flag.starts_with(known)) {
-                continue;
+        for flag in flag_names(&read_doc(name)) {
+            if !defined.contains(&flag) {
+                unknown.push(format!("{name}: {flag}"));
             }
-            flags.push(format!("{name}:{entry}"));
         }
     }
 
     // Assert
     assert!(
-        flags.is_empty(),
-        "flags named in docs:\n{}",
-        flags.join("\n")
+        unknown.is_empty(),
+        "flags named in docs but not in --help:\n{}",
+        unknown.join("\n")
     );
 }
 

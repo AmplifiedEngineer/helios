@@ -302,24 +302,53 @@ pub fn merge_needs_me(review: Vec<PrSummary>, assigned: Vec<PrSummary>) -> Vec<P
 pub fn collect(
     mut fetch: impl FnMut(Option<&str>) -> Result<SearchPage, ListError>,
 ) -> Result<Listing, ListError> {
-    let mut rows = Vec::new();
-    let mut partial = false;
-    let mut cursor: Option<String> = None;
-    for fetched in 1..=MAX_PAGES {
-        let page = fetch(cursor.as_deref())?;
-        partial |= page.had_errors || page.issue_count >= SEARCH_CAP;
-        rows.extend(page.rows);
-        let next = match page.end_cursor {
-            Some(next) if page.has_next_page && rows.len() < SEARCH_CAP => next,
-            _ => break,
-        };
-        if fetched == MAX_PAGES || cursor.as_deref() == Some(next.as_str()) {
-            partial = true;
-            break;
+    let mut pager = Pager::default();
+    loop {
+        let page = fetch(pager.cursor())?;
+        if !pager.push(page) {
+            return Ok(pager.finish());
         }
-        cursor = Some(next);
     }
-    Ok(Listing { rows, partial })
+}
+
+/// The paging rules of `collect`, for callers that fetch pages asynchronously.
+#[derive(Debug, Default)]
+pub struct Pager {
+    rows: Vec<PrSummary>,
+    partial: bool,
+    cursor: Option<String>,
+    fetched: usize,
+}
+
+impl Pager {
+    /// The cursor to resume after, `None` for the first page.
+    pub fn cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
+    }
+
+    /// Takes in a page; returns whether another page should be fetched.
+    pub fn push(&mut self, page: SearchPage) -> bool {
+        self.fetched += 1;
+        self.partial |= page.had_errors || page.issue_count >= SEARCH_CAP;
+        self.rows.extend(page.rows);
+        let next = match page.end_cursor {
+            Some(next) if page.has_next_page && self.rows.len() < SEARCH_CAP => next,
+            _ => return false,
+        };
+        if self.fetched == MAX_PAGES || self.cursor.as_deref() == Some(next.as_str()) {
+            self.partial = true;
+            return false;
+        }
+        self.cursor = Some(next);
+        true
+    }
+
+    pub fn finish(self) -> Listing {
+        Listing {
+            rows: self.rows,
+            partial: self.partial,
+        }
+    }
 }
 
 pub fn filter_drafts(rows: Vec<PrSummary>, show_drafts: bool) -> Vec<PrSummary> {
