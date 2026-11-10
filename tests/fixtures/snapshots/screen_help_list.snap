@@ -1,0 +1,14 @@
+[Mine]  Needs me
+HOST       REPO       #      T┌Keys──────────────────────────────────┐AFT REVIEW   CHECKS   UPDATED
+github.com org/repo   #1     F│j/k move                              │                      2h
+github.com org/repo   #2     S│g/G first/last                        │                      2h
+                              │Enter open                            │
+                              │m mine/needs me                       │
+                              │r refresh                             │
+                              │d toggle drafts                       │
+                              │? help                                │
+                              │q quit                                │
+                              │Ctrl-C quit                           │
+                              └──────────────────────────────────────┘
+j/k move  g/G first/last  Enter open  m mine/needs me  r refresh  d toggle drafts  ? help  q quit
+Ctrl-C quit

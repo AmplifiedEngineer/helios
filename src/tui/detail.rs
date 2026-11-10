@@ -3,6 +3,7 @@
 //! The detail view: one tab each for overview, conversation, commits, files and checks.
 
 use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
@@ -37,11 +38,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
             DetailTab::Overview => overview_lines(detail),
             DetailTab::Conversation => with_partial_note(detail, conversation_lines(detail, clock)),
             DetailTab::Commits => with_partial_note(detail, commit_lines(&detail.commits, clock)),
-            DetailTab::Files => file_lines(app.files()),
+            DetailTab::Files => file_lines(app),
             DetailTab::Checks => with_partial_note(detail, check_lines(&detail.check_runs)),
         },
     };
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph.scroll((files_scroll(app, area), 0)), area);
+}
+
+/// How far the Files tab scrolls so the selected file stays in view.
+fn files_scroll(app: &App, area: Rect) -> u16 {
+    if app.tab != DetailTab::Files {
+        return 0;
+    }
+    let hidden = app
+        .file_cursor()
+        .saturating_sub(usize::from(area.height).saturating_sub(1));
+    u16::try_from(hidden).unwrap_or(u16::MAX)
 }
 
 fn with_partial_note(detail: &PrDetail, mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
@@ -99,18 +112,28 @@ fn commit_lines(commits: &[CommitSummary], clock: &impl Clock) -> Vec<Line<'stat
         .collect()
 }
 
-fn file_lines(files: Option<&[ChangedFile]>) -> Vec<Line<'static>> {
-    let Some(files) = files else {
+fn file_lines(app: &App) -> Vec<Line<'static>> {
+    if let Some(error) = app.files_failure() {
+        return vec![Line::from(failure_message(error))];
+    }
+    let Some(files) = app.files() else {
         return vec![Line::from(FILES_LOADING_TEXT)];
     };
+    let selected = app.file_cursor();
     files
         .iter()
-        .map(|file| {
+        .enumerate()
+        .map(|(index, file)| {
             let marks = file_marks(file);
-            if marks.is_empty() {
+            let line = if marks.is_empty() {
                 Line::from(file.path.to_string())
             } else {
                 Line::from(format!("{} [{}]", file.path, marks.join(", ")))
+            };
+            if index == selected {
+                line.style(Style::new().add_modifier(Modifier::REVERSED))
+            } else {
+                line
             }
         })
         .collect()
