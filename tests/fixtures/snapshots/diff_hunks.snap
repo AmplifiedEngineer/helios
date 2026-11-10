@@ -1,0 +1,24 @@
+src/lib.rs
+@@ -10,4 +10,4 @@ fn demo() {
+  10   10  ctxbefore
+  11      -deletedline
+       11 +addedline
+  12   12  ctxafter
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
