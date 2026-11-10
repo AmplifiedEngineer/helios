@@ -484,3 +484,46 @@ fn the_detail_query_asks_for_the_totals() {
         "comments, threads, commits and checks need totals: {count}"
     );
 }
+
+#[test]
+fn a_detail_with_a_bad_time_or_bad_json_is_a_typed_error() {
+    // Arrange
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/detail/recorded-public-pr.json");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(path).expect("read fixture"))
+            .expect("fixture json");
+    value["data"]["repository"]["pullRequest"]["comments"]["nodes"][0]["createdAt"] =
+        "not a time".into();
+
+    // Act
+    let bad_time = map_detail(&value.to_string());
+    let bad_json = map_detail("{");
+
+    // Assert
+    assert!(matches!(
+        bad_time,
+        Err(helios::github::queries::DetailError::Timestamp)
+    ));
+    assert!(matches!(
+        bad_json,
+        Err(helios::github::queries::DetailError::Parse)
+    ));
+}
+
+#[test]
+fn a_files_body_that_is_not_an_array_is_a_typed_error() {
+    // Arrange
+    let bodies = ["{}", "[{\"filename\": 1}]", ""];
+
+    for body in bodies {
+        // Act
+        let result = map_files(body);
+
+        // Assert
+        assert!(
+            matches!(result, Err(helios::github::queries::FilesError::Parse)),
+            "{body:?}"
+        );
+    }
+}

@@ -243,10 +243,17 @@ fn assert_clean(screen_name: &str, rows: &[String], visible: &[&str]) {
 #[test]
 fn escapes_in_every_remote_field_render_clean_on_every_screen() {
     // Arrange: every remote field of the fixture holds hidden characters before any render
+    let built = [list_json(), detail_json(), files_json()].concat();
     for (field, raw) in raw_fields() {
         assert!(
             raw.chars().any(is_hidden),
             "the raw {field} holds no hidden character"
+        );
+        let quoted = serde_json::to_string(&raw).expect("a string serializes");
+        let escaped = &quoted[1..quoted.len() - 1];
+        assert!(
+            field == "host" || built.contains(escaped),
+            "the {field} is not in the built fixtures, so its check proves nothing"
         );
     }
     let list = list_app();
