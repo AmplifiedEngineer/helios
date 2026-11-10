@@ -19,7 +19,7 @@ use support::render::buffer_text;
 use support::snapshot::assert_snapshot;
 
 const WIDTH: u16 = 100;
-const HEIGHT: u16 = 14;
+const HEIGHT: u16 = 16;
 const HOST: &str = "github.com";
 const ACCOUNT: &str = "octo";
 

@@ -3,7 +3,7 @@
 //! Moving around: the list cursor, the open pull request, its tabs, files and diff.
 
 use super::{App, DetailTab, ListView, LoadRequest, Screen};
-use crate::model::{ChangedFile, FileDiff, PrSummary};
+use crate::model::{ChangedFile, FileDiff, PrKey, PrSummary};
 use crate::tui::diff::MAX_DIFF_LINES;
 
 /// One move of a cursor or a scroll position.
@@ -50,6 +50,15 @@ impl App {
     /// The row the list cursor is on.
     pub fn highlighted(&self) -> Option<&PrSummary> {
         self.list_rows().get(self.list_cursor()).copied()
+    }
+
+    /// The pull request the user is looking at: the list row under the cursor on the list,
+    /// the open pull request elsewhere.
+    pub fn current_pr(&self) -> Option<&PrKey> {
+        match self.screen {
+            Screen::List => self.highlighted().map(|row| &row.key),
+            Screen::Detail | Screen::Diff => self.selected.as_ref(),
+        }
     }
 
     pub fn move_cursor(&mut self, step: Step) {
