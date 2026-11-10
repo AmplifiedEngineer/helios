@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::github::errors::GithubError;
-use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary};
+use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
 use worker::Loaded;
 
 pub mod refresh;
@@ -56,6 +56,16 @@ pub enum ListFilter {
 
 /// The host and login of one account.
 pub type AccountKey = (String, String);
+
+impl ListFilter {
+    fn matches(self, row: &PrSummary) -> bool {
+        match self {
+            Self::All => true,
+            Self::Review => row.tags.contains(&Tag::Review),
+            Self::Assigned => row.tags.contains(&Tag::Assigned),
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct App {
@@ -126,6 +136,16 @@ impl App {
         &self.rows
     }
 
+    /// The rows the list shows: drafts only when on, and with `by_tag` only the rows the
+    /// filter selects.
+    pub fn visible_rows(&self, by_tag: bool) -> Vec<&PrSummary> {
+        self.rows
+            .iter()
+            .filter(|row| row.is_visible(self.show_drafts))
+            .filter(|row| !by_tag || self.filter.matches(row))
+            .collect()
+    }
+
     /// The accounts whose latest load failed, by host and login.
     pub fn host_failures(&self) -> &BTreeMap<AccountKey, GithubError> {
         &self.host_failures
@@ -140,6 +160,11 @@ impl App {
     /// The loads asked for and not yet taken by the event loop.
     pub fn requests(&self) -> &[LoadRequest] {
         &self.requests
+    }
+
+    /// Hands the pending loads to the event loop, so none runs twice.
+    pub fn take_requests(&mut self) -> Vec<LoadRequest> {
+        std::mem::take(&mut self.requests)
     }
 
     /// Keeps the changed files of the open pull request for the Files tab.

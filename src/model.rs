@@ -85,6 +85,13 @@ pub struct PrSummary {
     pub check_state: Option<CheckState>,
 }
 
+impl PrSummary {
+    /// Whether the row shows: a draft shows only when drafts are on.
+    pub fn is_visible(&self, show_drafts: bool) -> bool {
+        show_drafts || !self.is_draft
+    }
+}
+
 /// Why a changed file has no diff to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

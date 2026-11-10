@@ -2,7 +2,7 @@
 
 use chrono::{TimeZone, Utc};
 use helios::app::worker::{channel, Loaded};
-use helios::app::{App, DetailState};
+use helios::app::{App, DetailState, LoadRequest};
 use helios::github::errors::GithubError;
 use helios::model::{PrKey, PrSummary};
 use helios::sanitize::sanitize;
@@ -267,4 +267,70 @@ fn a_detail_result_for_a_pr_that_is_no_longer_selected_is_dropped() {
     // Assert
     assert!(matches!(app.detail(), DetailState::Loading));
     assert!(app.files().is_none());
+}
+
+#[test]
+fn taking_the_requests_hands_them_over_once() {
+    // Arrange
+    let mut app = app_with_rows(&[1, 2]);
+    app.open(key(1));
+    app.open(key(2));
+
+    // Act
+    let taken = app.take_requests();
+    let again = app.take_requests();
+
+    // Assert
+    assert_eq!(
+        taken,
+        vec![LoadRequest::Detail(key(1)), LoadRequest::Detail(key(2))]
+    );
+    assert!(again.is_empty(), "a request ran twice: {again:?}");
+    assert!(app.requests().is_empty());
+}
+
+#[test]
+fn visible_rows_apply_the_draft_and_tag_rules() {
+    // Arrange
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    let mut draft = summary(1);
+    draft.is_draft = true;
+    let mut reviewed = summary(2);
+    reviewed.tags = vec![helios::model::Tag::Review];
+    let assigned = {
+        let mut row = summary(3);
+        row.tags = vec![helios::model::Tag::Assigned];
+        row
+    };
+    app.apply(Loaded {
+        generation,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Ok(vec![draft, reviewed, assigned]),
+    });
+    let numbers = |app: &App, by_tag: bool| -> Vec<u64> {
+        app.visible_rows(by_tag)
+            .iter()
+            .map(|row| row.key.number)
+            .collect()
+    };
+
+    // Act
+    let hidden = numbers(&app, true);
+    app.toggle_drafts();
+    let shown = numbers(&app, true);
+    app.cycle_filter();
+    let review_only = numbers(&app, true);
+    let untagged_filter = numbers(&app, false);
+
+    // Assert
+    assert_eq!(hidden, vec![2, 3]);
+    assert_eq!(shown, vec![1, 2, 3]);
+    assert_eq!(review_only, vec![2]);
+    assert_eq!(
+        untagged_filter,
+        vec![1, 2, 3],
+        "the tag filter is off for Mine"
+    );
 }

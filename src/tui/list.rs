@@ -10,7 +10,7 @@ use ratatui::widgets::{Paragraph, Row, Table};
 use ratatui::Frame;
 
 use crate::app::refresh::Clock;
-use crate::app::{App, ListFilter};
+use crate::app::App;
 use crate::github::errors::GithubError;
 use crate::model::{CheckState, PrSummary, ReviewDecision, Tag};
 use crate::sanitize::sanitize;
@@ -39,10 +39,8 @@ const SECONDS_PER_DAY: u64 = 86_400;
 pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, by_tag: bool) {
     let now = clock.now();
     let rows = app
-        .rows()
-        .iter()
-        .filter(|row| app.show_drafts || !row.is_draft)
-        .filter(|row| !by_tag || matches_filter(row, app.filter))
+        .visible_rows(by_tag)
+        .into_iter()
         .map(|row| table_row(row, now));
     let failures: Vec<String> = app
         .host_failures()
@@ -69,14 +67,6 @@ pub(crate) fn failure_message(error: &GithubError) -> &'static str {
         GithubError::Timeout => "GitHub did not answer in time",
         GithubError::Api { .. } => "GitHub answered with an error",
         GithubError::Decode => "GitHub sent a response helios could not read",
-    }
-}
-
-fn matches_filter(row: &PrSummary, filter: ListFilter) -> bool {
-    match filter {
-        ListFilter::All => true,
-        ListFilter::Review => row.tags.contains(&Tag::Review),
-        ListFilter::Assigned => row.tags.contains(&Tag::Assigned),
     }
 }
 

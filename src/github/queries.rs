@@ -353,7 +353,7 @@ impl Pager {
 
 pub fn filter_drafts(rows: Vec<PrSummary>, show_drafts: bool) -> Vec<PrSummary> {
     rows.into_iter()
-        .filter(|row| show_drafts || !row.is_draft)
+        .filter(|row| row.is_visible(show_drafts))
         .collect()
 }
 
