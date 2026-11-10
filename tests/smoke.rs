@@ -2,7 +2,7 @@
 
 use chrono::{TimeZone, Utc};
 use helios::github::errors::GithubError;
-use helios::github::queries::ListKind;
+use helios::github::queries::{ListKind, Listing};
 use helios::github::GithubApi;
 use helios::model::{ChangedFile, PrDetail, PrKey, PrSummary};
 use helios::sanitize::sanitize;
@@ -51,11 +51,11 @@ impl FakeApi {
 }
 
 impl GithubApi for FakeApi {
-    async fn list(&self, kind: ListKind) -> Result<Vec<PrSummary>, GithubError> {
+    async fn list(&self, kind: ListKind) -> Result<Listing, GithubError> {
         if self.failure {
             return Err(GithubError::Network);
         }
-        Ok(match kind {
+        let rows = match kind {
             ListKind::Mine => {
                 let mut rows = self.rows(&self.mine, false);
                 rows.extend(self.rows(&self.drafts_in_mine, true));
@@ -64,6 +64,10 @@ impl GithubApi for FakeApi {
             ListKind::Review => self.rows(&self.review, false),
             ListKind::Assigned => self.rows(&self.assigned, false),
             _ => Vec::new(),
+        };
+        Ok(Listing {
+            rows,
+            partial: false,
         })
     }
 

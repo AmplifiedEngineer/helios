@@ -31,6 +31,7 @@ const COLUMN_WIDTHS: [Constraint; 10] = [
     Constraint::Length(8),
     Constraint::Length(8),
 ];
+const PARTIAL_NOTE: &str = "Some rows are not shown: GitHub cut the list short.";
 const DRAFT_MARK: &str = "draft";
 const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 3_600;
@@ -52,11 +53,14 @@ pub fn render_rows(
 ) {
     let now = clock.now();
     let rows = rows.into_iter().map(|row| table_row(row, now));
-    let failures: Vec<String> = app
+    let mut failures: Vec<String> = app
         .host_failures()
         .iter()
         .map(|((host, _), error)| format!("{}: {}", sanitize(host), failure_message(error)))
         .collect();
+    if app.has_partial_list() {
+        failures.insert(0, PARTIAL_NOTE.to_string());
+    }
     let failure_height = u16::try_from(failures.len()).unwrap_or(u16::MAX);
     let [table_area, failure_area] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(failure_height)]).areas(area);

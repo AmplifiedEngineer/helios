@@ -12,9 +12,9 @@ use tokio::runtime::Handle;
 use super::worker::{messages, Loaded, Message};
 use super::{ListView, LoadRequest};
 use crate::github::errors::GithubError;
-use crate::github::queries::{merge_needs_me, ListKind};
+use crate::github::queries::{merge_needs_me, ListKind, Listing};
 use crate::github::GithubApi;
-use crate::model::{PrKey, PrSummary};
+use crate::model::PrKey;
 
 /// One account and the client that talks to its host.
 pub struct Source<A> {
@@ -133,24 +133,30 @@ impl<A: GithubApi + 'static> Loader<A> {
 }
 
 /// The Review and Assigned searches of one account, merged and tagged.
-async fn needs_me<A: GithubApi>(api: &A) -> Result<Vec<PrSummary>, GithubError> {
+async fn needs_me<A: GithubApi>(api: &A) -> Result<Listing, GithubError> {
     let (review, assigned) = tokio::join!(api.list(ListKind::Review), api.list(ListKind::Assigned));
-    Ok(merge_needs_me(review?, assigned?))
+    let (review, assigned) = (review?, assigned?);
+    Ok(Listing {
+        partial: review.partial || assigned.partial,
+        rows: merge_needs_me(review.rows, assigned.rows),
+    })
 }
 
 async fn list_message<A>(
     view: ListView,
     generation: u64,
     source: Source<A>,
-    load: impl Future<Output = Result<Vec<PrSummary>, GithubError>>,
+    load: impl Future<Output = Result<Listing, GithubError>>,
 ) -> Message {
+    let listing = load.await;
     Message::List(
         view,
         Loaded {
             generation,
             host: source.host,
             account: source.login,
-            result: load.await,
+            partial: listing.as_ref().is_ok_and(|listing| listing.partial),
+            result: listing.map(|listing| listing.rows),
         },
     )
 }

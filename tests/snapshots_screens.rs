@@ -69,6 +69,7 @@ fn listed() -> App {
     let generation = app.begin_refresh();
     app.apply_mine(Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Ok(vec![row(1, "First change"), row(2, "Second change")]),
@@ -165,6 +166,7 @@ fn a_failed_account_shows_its_message_under_the_rows() {
     let generation = app.begin_refresh();
     app.apply_mine(Loaded {
         generation,
+        partial: false,
         host: "ghe.example.com".into(),
         account: ACCOUNT.into(),
         result: Err(GithubError::Timeout),

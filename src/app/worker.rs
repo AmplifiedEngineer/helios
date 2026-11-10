@@ -12,6 +12,8 @@ use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary};
 #[derive(Debug)]
 pub struct Loaded {
     pub generation: u64,
+    /// GitHub cut the list short, so `result` may hold fewer rows than exist.
+    pub partial: bool,
     pub host: String,
     pub account: String,
     pub result: Result<Vec<PrSummary>, GithubError>,

@@ -4,9 +4,9 @@
 
 use std::future::Future;
 
-use crate::model::{ChangedFile, PrDetail, PrSummary};
+use crate::model::{ChangedFile, PrDetail};
 use errors::GithubError;
-use queries::ListKind;
+use queries::{ListKind, Listing};
 
 pub mod errors;
 pub mod octo;
@@ -14,10 +14,8 @@ pub mod queries;
 
 /// What the rest of helios needs from GitHub, so callers can swap in a fake.
 pub trait GithubApi: Send + Sync {
-    fn list(
-        &self,
-        kind: ListKind,
-    ) -> impl Future<Output = Result<Vec<PrSummary>, GithubError>> + Send;
+    /// The rows of one list, and whether GitHub cut it short.
+    fn list(&self, kind: ListKind) -> impl Future<Output = Result<Listing, GithubError>> + Send;
 
     fn detail(
         &self,

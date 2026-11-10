@@ -15,10 +15,10 @@ use crate::accounts::{self, Account};
 use crate::github::errors::GithubError;
 use crate::github::queries::{
     detail_variables, files_path, map_detail, map_files, map_page, query_variables, ListKind,
-    Pager, DETAIL_QUERY, LIST_QUERY,
+    Listing, Pager, DETAIL_QUERY, LIST_QUERY,
 };
 use crate::github::GithubApi;
-use crate::model::{ChangedFile, PrDetail, PrSummary};
+use crate::model::{ChangedFile, PrDetail};
 use crate::secret::Secret;
 
 /// Wait applied to a rate limit error that carries no reset header.
@@ -317,14 +317,14 @@ impl Octo {
 }
 
 impl GithubApi for Octo {
-    async fn list(&self, kind: ListKind) -> Result<Vec<PrSummary>, GithubError> {
+    async fn list(&self, kind: ListKind) -> Result<Listing, GithubError> {
         let mut pager = Pager::default();
         loop {
             let variables = query_variables(kind, pager.cursor());
             let (body, _) = self.graphql_body(LIST_QUERY, &variables).await?;
             let page = map_page(&self.host, &self.login, &body).map_err(|_| GithubError::Decode)?;
             if !pager.push(page) {
-                return Ok(pager.finish().rows);
+                return Ok(pager.finish());
             }
         }
     }
