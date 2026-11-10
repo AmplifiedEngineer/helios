@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod keys;
+pub mod list;
+pub mod mine;
+pub mod needs_me;
 
 use std::io::{self, Stdout, Write};
 use std::panic;
