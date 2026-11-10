@@ -110,6 +110,11 @@ where
         session
     }
 
+    /// Sets how long the list waits between automatic refreshes.
+    pub fn set_refresh_interval(&mut self, interval: Duration) {
+        self.scheduler = Scheduler::with_interval(self.clock.clone(), interval);
+    }
+
     /// Replaces the browser opener, for a test.
     pub fn set_opener(&mut self, opener: Opener) {
         self.opener = opener;

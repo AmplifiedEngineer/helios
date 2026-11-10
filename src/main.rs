@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::io;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use helios::accounts;
 use helios::app::loader::{Loader, Source};
@@ -88,6 +89,7 @@ fn run(config: &Config) -> io::Result<()> {
         tui::draw_first_frame(&mut terminal, true)?;
     }
     let mut session = Session::new(terminal, app, TerminalEvents, SystemClock, loader, results);
+    session.set_refresh_interval(Duration::from_secs(config.refresh_secs));
     let outcome = session.run();
     tui::restore_terminal();
     outcome
