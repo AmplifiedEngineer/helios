@@ -54,6 +54,9 @@ pub enum ListFilter {
     Assigned,
 }
 
+/// The host and login of one account.
+pub type AccountKey = (String, String);
+
 #[derive(Debug, Default)]
 pub struct App {
     pub screen: Screen,
@@ -67,7 +70,7 @@ pub struct App {
     generation: u64,
     cursor: usize,
     rows: Vec<PrSummary>,
-    host_failures: BTreeMap<String, GithubError>,
+    host_failures: BTreeMap<AccountKey, GithubError>,
 }
 
 impl DetailTab {
@@ -123,8 +126,8 @@ impl App {
         &self.rows
     }
 
-    /// The hosts whose latest load failed, by host name.
-    pub fn host_failures(&self) -> &BTreeMap<String, GithubError> {
+    /// The accounts whose latest load failed, by host and login.
+    pub fn host_failures(&self) -> &BTreeMap<AccountKey, GithubError> {
         &self.host_failures
     }
 
@@ -192,7 +195,16 @@ impl App {
             return;
         }
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
-        self.selected = self.cursor().cloned();
+        match self.cursor().cloned() {
+            Some(key) => self.select(key),
+            None => self.clear_selection(),
+        }
+    }
+
+    fn clear_selection(&mut self) {
+        self.selected = None;
+        self.detail = DetailState::Loading;
+        self.files = None;
     }
 
     /// Returns whether the result was applied.
@@ -202,12 +214,16 @@ impl App {
         }
         match loaded.result {
             Ok(rows) => {
-                self.host_failures.remove(&loaded.host);
-                self.rows = rows;
+                self.host_failures
+                    .remove(&(loaded.host.clone(), loaded.account.clone()));
+                self.rows
+                    .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
+                self.rows.extend(rows);
                 self.restore_cursor();
             }
             Err(error) => {
-                self.host_failures.insert(loaded.host, error);
+                self.host_failures
+                    .insert((loaded.host, loaded.account), error);
             }
         }
         true

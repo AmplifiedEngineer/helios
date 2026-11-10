@@ -435,3 +435,52 @@ fn a_null_author_maps_to_the_ghost_login() {
     // Assert
     assert_eq!(author, "ghost");
 }
+
+fn recorded_with_total(connection: &str, total: u64) -> PrDetail {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/detail/recorded-public-pr.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(path).expect("read fixture"))
+            .expect("fixture json");
+    json["data"]["repository"]["pullRequest"][connection]["totalCount"] = total.into();
+    map_detail(&json.to_string()).expect("map detail")
+}
+
+#[test]
+fn a_connection_with_more_items_than_returned_marks_the_detail_partial() {
+    // Arrange
+    let whole = recorded();
+    let total = 10_000;
+
+    // Act
+    let cut: Vec<(&str, bool)> = ["comments", "reviewThreads", "commits"]
+        .into_iter()
+        .map(|name| (name, recorded_with_total(name, total).partial))
+        .collect();
+
+    // Assert
+    assert!(!whole.partial, "a fixture without totals is not partial");
+    assert_eq!(
+        cut,
+        vec![
+            ("comments", true),
+            ("reviewThreads", true),
+            ("commits", true)
+        ]
+    );
+}
+
+#[test]
+fn the_detail_query_asks_for_the_totals() {
+    // Arrange
+    let query = helios::github::queries::DETAIL_QUERY;
+
+    // Act
+    let count = query.matches("totalCount").count();
+
+    // Assert
+    assert!(
+        count >= 4,
+        "comments, threads, commits and checks need totals: {count}"
+    );
+}

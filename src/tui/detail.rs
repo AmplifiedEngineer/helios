@@ -19,6 +19,7 @@ const COMMENTS_HEADING: &str = "Issue comments";
 const THREADS_HEADING: &str = "Review threads";
 const REPLY_INDENT: &str = "  ";
 const LOADING_TEXT: &str = "Loading...";
+const PARTIAL_NOTE: &str = "Some items are not shown: GitHub has more than were fetched.";
 const FILES_LOADING_TEXT: &str = "Loading files...";
 const MARK_RENAMED_FROM: &str = "renamed from";
 const MARK_TRUNCATED: &str = "truncated";
@@ -34,13 +35,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
         DetailState::Failed(error) => vec![Line::from(failure_message(error))],
         DetailState::Loaded(detail) => match app.tab {
             DetailTab::Overview => overview_lines(detail),
-            DetailTab::Conversation => conversation_lines(detail, clock),
-            DetailTab::Commits => commit_lines(&detail.commits, clock),
+            DetailTab::Conversation => with_partial_note(detail, conversation_lines(detail, clock)),
+            DetailTab::Commits => with_partial_note(detail, commit_lines(&detail.commits, clock)),
             DetailTab::Files => file_lines(app.files()),
-            DetailTab::Checks => check_lines(&detail.check_runs),
+            DetailTab::Checks => with_partial_note(detail, check_lines(&detail.check_runs)),
         },
     };
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
+}
+
+fn with_partial_note(detail: &PrDetail, mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    if detail.partial {
+        lines.insert(0, Line::from(PARTIAL_NOTE));
+    }
+    lines
 }
 
 fn overview_lines(detail: &PrDetail) -> Vec<Line<'static>> {

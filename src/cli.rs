@@ -121,6 +121,13 @@ fn flag_value<'a>(
         .ok_or(CliError::MissingValue(flag))
 }
 
+impl Config {
+    /// Whether `host` is shown: every host when `--hosts` is not set.
+    pub fn includes_host(&self, host: &str) -> bool {
+        self.hosts.is_empty() || self.hosts.iter().any(|known| known == host)
+    }
+}
+
 /// The usage text `--help` prints.
 pub fn help() -> String {
     format!(
