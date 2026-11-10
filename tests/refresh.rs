@@ -182,3 +182,50 @@ fn retry_after_wins_when_both_are_present_and_reset_is_earlier() {
     // Assert
     assert_waits_until(&mut scheduler, &clock, LONG_WAIT);
 }
+
+#[test]
+fn manual_refresh_is_refused_while_rate_limited() {
+    // Arrange
+    let (mut scheduler, clock) = scheduler();
+    scheduler.on_error(&GithubError::RateLimited {
+        retry_at: clock.after(LONG_WAIT),
+    });
+    clock.advance(TWO_MINUTES);
+
+    // Act
+    let fired = scheduler.manual();
+
+    // Assert
+    assert!(
+        !fired,
+        "the refresh key hammered GitHub during a rate limit"
+    );
+    assert_waits_until(&mut scheduler, &clock, LONG_WAIT - TWO_MINUTES);
+}
+
+#[test]
+fn manual_refresh_is_refused_during_a_header_backoff() {
+    // Arrange
+    let (mut scheduler, clock) = scheduler();
+    scheduler.back_off(Some(clock.after(SHORT_WAIT)), None);
+
+    // Act
+    let fired = scheduler.manual();
+
+    // Assert
+    assert!(!fired);
+}
+
+#[test]
+fn manual_refresh_fires_once_the_backoff_has_ended() {
+    // Arrange
+    let (mut scheduler, clock) = scheduler();
+    scheduler.back_off(Some(clock.after(SHORT_WAIT)), None);
+    clock.advance(SHORT_WAIT);
+
+    // Act
+    let fired = scheduler.manual();
+
+    // Assert
+    assert!(fired, "the refresh key stayed blocked after the backoff");
+}
