@@ -6,7 +6,7 @@ helios is planned as a terminal UI. It will list your own pull requests and the 
 
 ## Status
 
-Release 1 is in progress. It is not released yet. The program does nothing yet. Only library code exists: listing `gh` accounts, running `gh` safely and cleaning text from GitHub.
+Release 1 is in progress. It is not released yet. The terminal UI draws one empty frame and exits, so it does not list pull requests yet. `--smoke` works: it queries your accounts and prints the counts. helios never writes to GitHub.
 
 ## Requirements
 
@@ -15,7 +15,36 @@ Release 1 is in progress. It is not released yet. The program does nothing yet. 
 
 ## Usage
 
-Run `helios --version` or `helios -V` to print the version. Other flags and keys are documented once the CLI lands.
+```
+helios [options]
+```
+
+### Flags
+
+| Flag | Meaning |
+|------|---------|
+| `--hosts <hosts>` | Comma-separated hosts to include. `--smoke` honours it. Env: `HELIOS_HOSTS`. |
+| `--refresh-secs <secs>` | Refresh interval, 30 to 3600 seconds. The value is checked; nothing uses it yet. Env: `HELIOS_REFRESH_SECS`. |
+| `--drafts` | Count draft pull requests. `--smoke` honours it. |
+| `--smoke` | Query every account once, print the Mine and Needs me counts, and exit. It does not start the UI. Exit code 1 when there are no accounts or no host answers. |
+| `--version`, `-V` | Print the version and exit. |
+| `--help` | Print the usage and exit. |
+
+A flag beats its environment variable. `HELIOS_GH` names the `gh` program to run; the default is `gh`.
+
+### Keys
+
+The key table is defined for the terminal UI. The UI does not act on most of these keys yet.
+
+| Key | Action |
+|-----|--------|
+| `r` | refresh |
+| `f` | filter |
+| `d` | toggle drafts |
+| `Tab` | next tab |
+| `Shift-Tab` | previous tab |
+| `q` | quit |
+| `Ctrl-C` | quit |
 
 ## Release
 
