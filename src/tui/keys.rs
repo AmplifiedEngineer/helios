@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+
+use crate::app::{App, Screen};
+
+const FOOTER_SEPARATOR: &str = "  ";
 
 /// One key binding: the key label and what it does, shown in the footer and the help.
 pub struct Binding {
@@ -27,6 +32,14 @@ pub const BINDINGS: &[Binding] = &[
         action: "toggle drafts",
     },
     Binding {
+        key: "Tab",
+        action: "next tab",
+    },
+    Binding {
+        key: "Shift-Tab",
+        action: "previous tab",
+    },
+    Binding {
         key: "q",
         action: "quit",
     },
@@ -36,7 +49,17 @@ pub const BINDINGS: &[Binding] = &[
     },
 ];
 
-const FOOTER_SEPARATOR: &str = "  ";
+/// Applies one key press to the app.
+pub fn handle_key(app: &mut App, key: KeyEvent) {
+    if app.screen != Screen::Detail {
+        return;
+    }
+    match key.code {
+        KeyCode::Tab => app.tab = app.tab.next(),
+        KeyCode::BackTab => app.tab = app.tab.previous(),
+        _ => {}
+    }
+}
 
 /// The bold key label followed by its action, shared by the footer and the help.
 fn binding_spans(binding: &Binding) -> [Span<'static>; 2] {

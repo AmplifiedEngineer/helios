@@ -1,0 +1,60 @@
+label-external Skipped
+CodeQL-Build (go, manual, ./.github/codeql/codeql-config.yml) Success
+lint Success
+label-external / label_issues Success
+build (ubuntu-latest) Success
+CodeQL-Build (actions, none, security-and-quality) Success
+build (windows-latest) Success
+build (macos-latest) Success
+close-from-default-branch Skipped
+close-from-default-branch / close-from-default-branch Skipped
+govulncheck Success
+integration-tests (ubuntu-latest) Success
+integration-tests (windows-latest) Success
+integration-tests (macos-latest) Success
+check-requirements / check-requirements Skipped
+check-requirements / check-requirements Skipped
+check-requirements / close-unmet-requirements Skipped
+check-requirements / close-unmet-requirements Skipped
+close-unmet-requirements Skipped
+close-unmet-requirements Skipped
+close-no-help-wanted Skipped
+close-no-help-wanted Skipped
+ready-for-review Skipped
+ready-for-review Skipped
+CodeQL Success
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
