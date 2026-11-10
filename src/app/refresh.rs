@@ -4,6 +4,7 @@
 //! backoff after a rate limit.
 
 use super::Screen;
+use crate::cli::{REFRESH_SECS_MAX, REFRESH_SECS_MIN};
 use crate::github::errors::GithubError;
 use std::time::{Duration, SystemTime};
 
@@ -18,6 +19,7 @@ pub trait Clock {
 #[derive(Debug)]
 pub struct Scheduler<C: Clock> {
     clock: C,
+    interval: Duration,
     next_due: SystemTime,
     /// When the latest rate-limit backoff ends; a manual refresh waits for it.
     backoff_until: Option<SystemTime>,
@@ -25,9 +27,20 @@ pub struct Scheduler<C: Clock> {
 
 impl<C: Clock> Scheduler<C> {
     pub fn new(clock: C) -> Self {
-        let next_due = clock.now() + REFRESH_INTERVAL;
+        Self::with_interval(clock, REFRESH_INTERVAL)
+    }
+
+    /// A scheduler that refreshes every `interval`, kept within the bounds the
+    /// `--refresh-secs` flag allows so a zero or huge value cannot spin or overflow.
+    pub fn with_interval(clock: C, interval: Duration) -> Self {
+        let interval = interval.clamp(
+            Duration::from_secs(REFRESH_SECS_MIN),
+            Duration::from_secs(REFRESH_SECS_MAX),
+        );
+        let next_due = clock.now() + interval;
         Self {
             clock,
+            interval,
             next_due,
             backoff_until: None,
         }
@@ -79,6 +92,6 @@ impl<C: Clock> Scheduler<C> {
 
     fn schedule_next(&mut self) {
         self.backoff_until = None;
-        self.next_due = self.clock.now() + REFRESH_INTERVAL;
+        self.next_due = self.clock.now() + self.interval;
     }
 }
