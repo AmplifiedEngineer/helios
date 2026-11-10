@@ -12,6 +12,7 @@ use crate::app::refresh::REFRESH_INTERVAL;
 pub const REFRESH_SECS_MIN: u64 = 30;
 pub const REFRESH_SECS_MAX: u64 = 3600;
 
+const FLAG_PREFIX: &str = "--";
 const HOSTS_FLAG: &str = "--hosts";
 const REFRESH_FLAG: &str = "--refresh-secs";
 const DRAFTS_FLAG: &str = "--drafts";
@@ -62,10 +63,7 @@ pub enum CliError {
 /// A flag wins over its environment variable.
 pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, CliError> {
     let mut hosts = env.get(HOSTS_ENV).map(|raw| split_hosts(raw));
-    let mut refresh = env
-        .get(REFRESH_ENV)
-        .map(|raw| parse_refresh(raw, REFRESH_ENV))
-        .transpose()?;
+    let mut refresh = None;
     let mut config = Config {
         hosts: Vec::new(),
         refresh_secs: REFRESH_INTERVAL.as_secs(),
@@ -86,11 +84,11 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             HOSTS_FLAG => {
-                let raw = rest.next().ok_or(CliError::MissingValue(HOSTS_FLAG))?;
+                let raw = flag_value(&mut rest, HOSTS_FLAG)?;
                 hosts = Some(split_hosts(raw));
             }
             REFRESH_FLAG => {
-                let raw = rest.next().ok_or(CliError::MissingValue(REFRESH_FLAG))?;
+                let raw = flag_value(&mut rest, REFRESH_FLAG)?;
                 refresh = Some(parse_refresh(raw, REFRESH_FLAG)?);
             }
             DRAFTS_FLAG => config.drafts = true,
@@ -102,8 +100,25 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
     }
 
     config.hosts = hosts.unwrap_or_default();
+    let informational = config.help || config.version.is_some();
+    if refresh.is_none() && !informational {
+        refresh = env
+            .get(REFRESH_ENV)
+            .map(|raw| parse_refresh(raw, REFRESH_ENV))
+            .transpose()?;
+    }
     config.refresh_secs = refresh.unwrap_or(config.refresh_secs);
     Ok(config)
+}
+
+/// The value after `flag`; a following flag means the value is missing.
+fn flag_value<'a>(
+    rest: &mut std::slice::Iter<'a, String>,
+    flag: &'static str,
+) -> Result<&'a String, CliError> {
+    rest.next()
+        .filter(|value| !value.starts_with(FLAG_PREFIX))
+        .ok_or(CliError::MissingValue(flag))
 }
 
 /// The usage text `--help` prints.

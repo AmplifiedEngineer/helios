@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use helios::accounts::{Account, AccountState};
 use helios::github::errors::GithubError;
-use helios::github::octo::{Octo, TokenSource};
+use helios::github::octo::{Octo, TokenSource, MAX_PAGES};
 use helios::secret::Secret;
 use support::server::{RecordedRequest, ScriptedResponse, TestServer};
 
@@ -305,4 +305,133 @@ async fn a_403_with_the_sso_header_wins_over_rate_limit_headers() {
 
     // Assert
     assert!(matches!(result, Err(GithubError::SsoBlocked)), "{result:?}");
+}
+
+#[tokio::test]
+async fn an_absolute_next_link_on_the_same_base_is_followed_by_its_path() {
+    // Arrange
+    let server = TestServer::start_with(|request| match request.path.as_str() {
+        "/items?page=1" => {
+            let target = format!(
+                "http://{}/items?page=2",
+                request.header("Host").unwrap_or("")
+            );
+            ScriptedResponse::json(200, "[1]").with_header("Link", &link_to(&target))
+        }
+        "/items?page=2" => ScriptedResponse::json(200, "[2]"),
+        _ => ScriptedResponse::json(404, "{}"),
+    });
+    let octo = octo_for(&server);
+
+    // Act
+    let items = octo.get_pages("/items?page=1").await;
+
+    // Assert
+    let numbers: Vec<u64> = items
+        .expect("both pages are read")
+        .iter()
+        .filter_map(|v| v.as_u64())
+        .collect();
+    assert_eq!(numbers, vec![1, 2]);
+    assert_eq!(
+        paths(&server.requests()),
+        vec!["/items?page=1", "/items?page=2"]
+    );
+}
+
+#[tokio::test]
+async fn an_absolute_link_that_only_starts_like_the_base_is_rejected() {
+    // Arrange
+    let first = TestServer::start_with(|request| {
+        let target = format!(
+            "http://{}.evil.test/items?page=2",
+            request.header("Host").unwrap_or("")
+        );
+        ScriptedResponse::json(200, "[1]").with_header("Link", &link_to(&target))
+    });
+    let octo = octo_for(&first);
+
+    // Act
+    let result = octo.get_pages("/items?page=1").await;
+
+    // Assert
+    assert!(matches!(result, Err(GithubError::Decode)), "{result:?}");
+    assert_eq!(first.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn a_next_link_that_repeats_a_page_stops_the_walk() {
+    // Arrange
+    let server = TestServer::start(
+        ScriptedResponse::json(200, "[1]").with_header("Link", &link_to("/items?page=1")),
+    );
+    let octo = octo_for(&server);
+
+    // Act
+    let result = octo.get_pages("/items?page=1").await;
+
+    // Assert
+    assert!(matches!(result, Err(GithubError::Decode)), "{result:?}");
+    assert_eq!(
+        server.requests().len(),
+        1,
+        "the repeated page was not fetched again"
+    );
+}
+
+#[tokio::test]
+async fn a_walk_longer_than_the_page_cap_stops_with_an_error() {
+    // Arrange
+    let server = TestServer::start_with(|request| {
+        let page: usize = request
+            .path
+            .rsplit('=')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
+        ScriptedResponse::json(200, "[1]")
+            .with_header("Link", &link_to(&format!("/items?page={}", page + 1)))
+    });
+    let octo = octo_for(&server);
+
+    // Act
+    let result = octo.get_pages("/items?page=1").await;
+
+    // Assert
+    assert!(matches!(result, Err(GithubError::Decode)), "{result:?}");
+    assert_eq!(
+        server.requests().len(),
+        MAX_PAGES,
+        "no request past the cap"
+    );
+}
+
+#[tokio::test]
+async fn a_ghes_base_posts_graphql_to_api_graphql_and_reads_rest_under_api_v3() {
+    // Arrange
+    let server = TestServer::start_with(|request| match request.path.as_str() {
+        "/api/graphql" => ScriptedResponse::json(200, GRAPHQL_BODY),
+        "/api/v3/items" => ScriptedResponse::json(200, "[1]"),
+        _ => ScriptedResponse::json(404, "{}"),
+    });
+    let token = Arc::new(FixedToken(planted_token()));
+    let octo = Octo::new(
+        &account(),
+        &format!("{}/api/v3", server.origin()),
+        REQUEST_TIMEOUT,
+        token,
+    )
+    .expect("client builds");
+
+    // Act
+    let graphql = octo.graphql(QUERY).await;
+    let rest = octo.get_pages("/items").await;
+
+    // Assert
+    assert!(graphql.is_ok(), "{graphql:?}");
+    assert!(rest.is_ok(), "{rest:?}");
+    assert_eq!(
+        paths(&server.requests()),
+        vec!["/api/graphql", "/api/v3/items"]
+    );
 }
