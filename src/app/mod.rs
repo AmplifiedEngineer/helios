@@ -2,6 +2,8 @@
 
 //! The state the screens draw from and the workers feed.
 
+use std::collections::BTreeMap;
+
 use crate::github::errors::GithubError;
 use crate::model::{PrDetail, PrKey, PrSummary};
 use worker::Loaded;
@@ -25,16 +27,26 @@ pub enum DetailState {
     Failed(GithubError),
 }
 
+/// Which tagged rows the Needs me list shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListFilter {
+    #[default]
+    All,
+    Review,
+    Assigned,
+}
+
 #[derive(Debug, Default)]
 pub struct App {
     pub screen: Screen,
     pub selected: Option<PrKey>,
-    pub filter: String,
+    pub filter: ListFilter,
     pub show_drafts: bool,
     detail: DetailState,
     generation: u64,
     cursor: usize,
     rows: Vec<PrSummary>,
+    host_failures: BTreeMap<String, GithubError>,
 }
 
 impl App {
@@ -48,8 +60,27 @@ impl App {
         self.generation
     }
 
+    /// Moves the filter to the next of all, review and assigned, and back to all.
+    pub fn cycle_filter(&mut self) {
+        self.filter = match self.filter {
+            ListFilter::All => ListFilter::Review,
+            ListFilter::Review => ListFilter::Assigned,
+            ListFilter::Assigned => ListFilter::All,
+        };
+    }
+
+    /// Shows or hides draft pull requests.
+    pub fn toggle_drafts(&mut self) {
+        self.show_drafts = !self.show_drafts;
+    }
+
     pub fn rows(&self) -> &[PrSummary] {
         &self.rows
+    }
+
+    /// The hosts whose latest load failed, by host name.
+    pub fn host_failures(&self) -> &BTreeMap<String, GithubError> {
+        &self.host_failures
     }
 
     pub fn select(&mut self, key: PrKey) {
@@ -100,9 +131,15 @@ impl App {
         if loaded.generation < self.generation {
             return false;
         }
-        if let Ok(rows) = loaded.result {
-            self.rows = rows;
-            self.restore_cursor();
+        match loaded.result {
+            Ok(rows) => {
+                self.host_failures.remove(&loaded.host);
+                self.rows = rows;
+                self.restore_cursor();
+            }
+            Err(error) => {
+                self.host_failures.insert(loaded.host, error);
+            }
         }
         true
     }
