@@ -59,6 +59,13 @@ pub struct TestServer {
 
 impl TestServer {
     pub fn start(response: ScriptedResponse) -> Self {
+        Self::start_with(move |_| response.clone())
+    }
+
+    /// Answers each request with whatever `respond` builds from it.
+    pub fn start_with(
+        respond: impl Fn(&RecordedRequest) -> ScriptedResponse + Send + 'static,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback listener");
         let addr = listener.local_addr().expect("listener address");
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -72,7 +79,7 @@ impl TestServer {
                         break;
                     }
                     let Ok(stream) = stream else { continue };
-                    serve(stream, &response, &requests);
+                    serve(stream, &respond, &requests);
                 }
             })
         };
@@ -111,12 +118,17 @@ impl Drop for TestServer {
 
 /// Records the request before writing any response byte, so a client that
 /// has seen the response can rely on `requests()` already containing it.
-fn serve(stream: TcpStream, response: &ScriptedResponse, requests: &Mutex<Vec<RecordedRequest>>) {
+fn serve(
+    stream: TcpStream,
+    respond: &impl Fn(&RecordedRequest) -> ScriptedResponse,
+    requests: &Mutex<Vec<RecordedRequest>>,
+) {
     let Some(request) = parse_request(&stream) else {
         return;
     };
+    let response = respond(&request);
     requests.lock().expect("requests lock").push(request);
-    let _ = write_response(stream, response);
+    let _ = write_response(stream, &response);
 }
 
 fn parse_request(stream: &TcpStream) -> Option<RecordedRequest> {
