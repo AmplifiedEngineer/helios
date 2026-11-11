@@ -306,7 +306,7 @@ fn a_file_without_a_patch_does_not_scroll_and_an_empty_files_list_opens_nothing(
         path: sanitize("img.png"),
         previous_path: None,
         diff: FileDiff::Unavailable {
-            gap: DiffGap::Binary,
+            gap: DiffGap::ChangedNoText,
             web_url: sanitize("https://github.test/blob"),
         },
     };
