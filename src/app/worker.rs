@@ -6,7 +6,8 @@ use std::sync::mpsc;
 
 use super::ListView;
 use crate::github::errors::GithubError;
-use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary};
+use crate::github::queries::FilesListing;
+use crate::model::{PrDetail, PrKey, PrSummary};
 
 /// One account's list load, tagged with the refresh that started it.
 #[derive(Debug)]
@@ -29,7 +30,7 @@ pub enum Message {
     /// One account's rows for one list.
     List(ListView, Loaded),
     Detail(PrKey, Box<Result<PrDetail, GithubError>>),
-    Files(PrKey, Result<Vec<ChangedFile>, GithubError>),
+    Files(PrKey, Result<FilesListing, GithubError>),
     /// The system opener could not show a pull request in the browser.
     OpenFailed,
 }
