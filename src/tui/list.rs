@@ -16,21 +16,136 @@ use crate::github::errors::GithubError;
 use crate::model::{CheckState, PrSummary, ReviewDecision, Tag};
 use crate::sanitize::sanitize;
 
-const HEADER: [&str; 10] = [
-    "HOST", "REPO", "#", "TITLE", "AUTHOR", "TAG", "DRAFT", "REVIEW", "CHECKS", "UPDATED",
+const COLUMN_SPACING: u16 = 1;
+const MIN_TITLE_WIDTH: u16 = 30;
+const REPO_WIDTH: u16 = 24;
+const REPO_ELLIPSIS: char = '\u{2026}';
+
+/// A table column. The title takes the width the others leave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Column {
+    Host,
+    Repo,
+    Number,
+    Title,
+    Author,
+    Tag,
+    Draft,
+    Review,
+    Checks,
+    Updated,
+}
+
+/// The columns in screen order.
+const COLUMNS: [Column; 10] = [
+    Column::Host,
+    Column::Repo,
+    Column::Number,
+    Column::Title,
+    Column::Author,
+    Column::Tag,
+    Column::Draft,
+    Column::Review,
+    Column::Checks,
+    Column::Updated,
 ];
-const COLUMN_WIDTHS: [Constraint; 10] = [
-    Constraint::Length(12),
-    Constraint::Length(22),
-    Constraint::Length(6),
-    Constraint::Min(16),
-    Constraint::Length(12),
-    Constraint::Length(8),
-    Constraint::Length(5),
-    Constraint::Length(10),
-    Constraint::Length(8),
-    Constraint::Length(8),
+/// The columns a narrow terminal gives up, the first to go first. The host is only ever
+/// in the table when rows come from more than one.
+const DROP_ORDER: [Column; 6] = [
+    Column::Draft,
+    Column::Tag,
+    Column::Host,
+    Column::Author,
+    Column::Checks,
+    Column::Review,
 ];
+
+impl Column {
+    fn header(self) -> &'static str {
+        match self {
+            Self::Host => "HOST",
+            Self::Repo => "REPO",
+            Self::Number => "#",
+            Self::Title => "TITLE",
+            Self::Author => "AUTHOR",
+            Self::Tag => "TAG",
+            Self::Draft => "DRAFT",
+            Self::Review => "REVIEW",
+            Self::Checks => "CHECKS",
+            Self::Updated => "UPDATED",
+        }
+    }
+
+    /// The room the column needs; for the title, the least it is worth showing.
+    fn width(self) -> u16 {
+        match self {
+            Self::Host => 16,
+            Self::Repo => REPO_WIDTH,
+            Self::Number => 6,
+            Self::Title => MIN_TITLE_WIDTH,
+            Self::Author => 12,
+            Self::Tag | Self::Checks | Self::Updated => 8,
+            Self::Draft => 5,
+            Self::Review => 10,
+        }
+    }
+
+    fn constraint(self) -> Constraint {
+        match self {
+            Self::Title => Constraint::Fill(1),
+            other => Constraint::Length(other.width()),
+        }
+    }
+
+    fn cell(self, row: &PrSummary, now: SystemTime) -> String {
+        match self {
+            Self::Host => sanitize(&row.key.host).to_string(),
+            Self::Repo => trim_start(
+                &sanitize(&row.key.repo).to_string(),
+                usize::from(REPO_WIDTH),
+            ),
+            Self::Number => format!("#{}", row.key.number),
+            Self::Title => row.title.to_string(),
+            Self::Author => row.author.to_string(),
+            Self::Tag => tags_text(&row.tags),
+            Self::Draft => if row.is_draft { DRAFT_MARK } else { "" }.into(),
+            Self::Review => decision_text(row.review_decision.as_ref()),
+            Self::Checks => checks_text(row.check_state.as_ref()),
+            Self::Updated => age_since(row.updated_at, now),
+        }
+    }
+}
+
+/// The columns that fit in `width`: the host only when rows come from more than one, then
+/// the low-value columns dropped in turn until the title keeps its least width.
+fn visible_columns(width: u16, several_hosts: bool) -> Vec<Column> {
+    let mut columns: Vec<Column> = COLUMNS
+        .into_iter()
+        .filter(|column| several_hosts || *column != Column::Host)
+        .collect();
+    let mut drops = DROP_ORDER.into_iter();
+    while needed_width(&columns) > width {
+        let Some(dropped) = drops.next() else { break };
+        columns.retain(|column| *column != dropped);
+    }
+    columns
+}
+
+fn needed_width(columns: &[Column]) -> u16 {
+    let gaps = u16::try_from(columns.len().saturating_sub(1)).unwrap_or(u16::MAX);
+    let widths: u16 = columns.iter().map(|column| column.width()).sum();
+    widths.saturating_add(gaps.saturating_mul(COLUMN_SPACING))
+}
+
+/// `text` cut from the left to `max` characters, with an ellipsis where the start was.
+fn trim_start(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_owned();
+    }
+    let kept: String = text.chars().skip(count - max + 1).collect();
+    format!("{REPO_ELLIPSIS}{kept}")
+}
 const PARTIAL_NOTE: &str = "Some rows are not shown: GitHub cut the list short.";
 const DRAFT_MARK: &str = "draft";
 const SECONDS_PER_MINUTE: u64 = 60;
@@ -52,7 +167,10 @@ pub fn render_rows(
     selected: Option<usize>,
 ) {
     let now = clock.now();
-    let rows = rows.into_iter().map(|row| table_row(row, now));
+    let first_host = rows.first().map(|row| &row.key.host);
+    let several_hosts = rows.iter().any(|row| Some(&row.key.host) != first_host);
+    let columns = visible_columns(area.width, several_hosts);
+    let rows = rows.into_iter().map(|row| table_row(row, &columns, now));
     let mut failures: Vec<String> = app
         .host_failures()
         .iter()
@@ -64,8 +182,9 @@ pub fn render_rows(
     let failure_height = u16::try_from(failures.len()).unwrap_or(u16::MAX);
     let [table_area, failure_area] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(failure_height)]).areas(area);
-    let table = Table::new(rows, COLUMN_WIDTHS)
-        .header(Row::new(HEADER))
+    let table = Table::new(rows, columns.iter().map(|column| column.constraint()))
+        .column_spacing(COLUMN_SPACING)
+        .header(Row::new(columns.iter().map(|column| column.header())))
         .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
     let mut state = TableState::default().with_selected(selected);
     frame.render_stateful_widget(table, table_area, &mut state);
@@ -87,19 +206,8 @@ pub(crate) fn failure_message(error: &GithubError) -> &'static str {
     }
 }
 
-fn table_row(row: &PrSummary, now: SystemTime) -> Row<'static> {
-    Row::new([
-        sanitize(&row.key.host).to_string(),
-        sanitize(&row.key.repo).to_string(),
-        format!("#{}", row.key.number),
-        row.title.to_string(),
-        row.author.to_string(),
-        tags_text(&row.tags),
-        if row.is_draft { DRAFT_MARK } else { "" }.into(),
-        decision_text(row.review_decision.as_ref()),
-        checks_text(row.check_state.as_ref()),
-        age_since(row.updated_at, now),
-    ])
+fn table_row(row: &PrSummary, columns: &[Column], now: SystemTime) -> Row<'static> {
+    Row::new(columns.iter().map(|column| column.cell(row, now)))
 }
 
 fn tags_text(tags: &[Tag]) -> String {

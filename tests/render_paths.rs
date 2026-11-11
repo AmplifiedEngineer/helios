@@ -291,7 +291,8 @@ fn escapes_in_every_remote_field_render_clean_on_every_screen() {
     let diff_rows = draw(|frame| diff::render(frame, frame.area(), &diff_file));
 
     // Assert: no hidden character reaches any screen, and the visible text stays
-    assert_clean("list", &list_rows, &[HOST, REPO, TITLE, AUTHOR]);
+    // The one host is not a column; the host column is checked in snapshots_lists.
+    assert_clean("list", &list_rows, &[REPO, TITLE, AUTHOR]);
     for ((tab, visible), (_, rows)) in tabs.iter().zip(&tab_rows) {
         assert_clean(&format!("{tab:?} tab"), rows, visible);
     }

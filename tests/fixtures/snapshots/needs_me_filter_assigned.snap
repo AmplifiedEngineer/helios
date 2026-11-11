@@ -1,7 +1,7 @@
-HOST         REPO                   #      TITLE                AUTHOR       TAG      DRAFT REVIEW     CHECKS   UPDATED
-github.com   octo/widgets           #20    Assigned only        hubot        assigned       required   pass     2h
-github.com   octo/widgets           #22    No checks yet        octocat      assigned       required            2h
-github.com   octo/widgets           #23    Ghost PR             ghost        assigned                  pass     2h
+REPO                     #      TITLE                           AUTHOR       TAG      DRAFT REVIEW     CHECKS   UPDATED
+octo/widgets             #20    Assigned only                   hubot        assigned       required   pass     2h
+octo/widgets             #22    No checks yet                   octocat      assigned       required            2h
+octo/widgets             #23    Ghost PR                        ghost        assigned                  pass     2h
 
 
 
