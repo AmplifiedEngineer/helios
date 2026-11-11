@@ -59,7 +59,11 @@ pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
         Constraint::Length(footer_height),
     ])
     .areas(frame.area());
-    frame.render_widget(Paragraph::new(header_line(app)), header);
+    let mut header_text = header_line(app);
+    if let Some(alert) = app.alert() {
+        header_text.push_span(Span::raw(format!("{HEADER_SEPARATOR}{alert}")));
+    }
+    frame.render_widget(Paragraph::new(header_text), header);
     match app.screen {
         Screen::List => draw_list(frame, body, app, clock),
         Screen::Detail => detail::render(frame, body, app, clock),

@@ -30,6 +30,8 @@ pub enum Message {
     List(ListView, Loaded),
     Detail(PrKey, Box<Result<PrDetail, GithubError>>),
     Files(PrKey, Result<Vec<ChangedFile>, GithubError>),
+    /// The system opener could not show a pull request in the browser.
+    OpenFailed,
 }
 
 pub fn messages() -> (mpsc::Sender<Message>, mpsc::Receiver<Message>) {

@@ -118,6 +118,7 @@ pub struct App {
     account_count: usize,
     answered: usize,
     notice: Option<String>,
+    alert: Option<&'static str>,
     spinner_frame: usize,
     requests: Vec<LoadRequest>,
     generation: u64,
@@ -394,6 +395,19 @@ impl App {
     /// A fixed note for the screen, such as why no account could be read.
     pub fn set_notice(&mut self, notice: String) {
         self.notice = Some(notice);
+    }
+
+    /// A short fixed line for the header, cleared by the next key press.
+    pub fn set_alert(&mut self, alert: &'static str) {
+        self.alert = Some(alert);
+    }
+
+    pub fn alert(&self) -> Option<&'static str> {
+        self.alert
+    }
+
+    pub fn clear_alert(&mut self) {
+        self.alert = None;
     }
 
     pub fn notice(&self) -> Option<&str> {
