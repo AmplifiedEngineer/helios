@@ -116,12 +116,24 @@ impl Column {
     }
 }
 
-/// The columns that fit in `width`: the host only when rows come from more than one, then
-/// the low-value columns dropped in turn until the title keeps its least width.
-fn visible_columns(width: u16, several_hosts: bool) -> Vec<Column> {
+/// Whether the column has no text on any of `rows`. With no rows nothing is hidden.
+fn is_blank_everywhere(column: Column, rows: &[&PrSummary], now: SystemTime) -> bool {
+    !rows.is_empty() && rows.iter().all(|row| column.cell(row, now).is_empty())
+}
+
+/// The columns that fit in `width`: the host only when rows come from more than one, no
+/// column that is blank on every row, then the low-value columns dropped in turn until the
+/// title keeps its least width.
+fn visible_columns(
+    width: u16,
+    several_hosts: bool,
+    rows: &[&PrSummary],
+    now: SystemTime,
+) -> Vec<Column> {
     let mut columns: Vec<Column> = COLUMNS
         .into_iter()
         .filter(|column| several_hosts || *column != Column::Host)
+        .filter(|column| !is_blank_everywhere(*column, rows, now))
         .collect();
     let mut drops = DROP_ORDER.into_iter();
     while needed_width(&columns) > width {
@@ -169,7 +181,7 @@ pub fn render_rows(
     let now = clock.now();
     let first_host = rows.first().map(|row| &row.key.host);
     let several_hosts = rows.iter().any(|row| Some(&row.key.host) != first_host);
-    let columns = visible_columns(area.width, several_hosts);
+    let columns = visible_columns(area.width, several_hosts, &rows, now);
     let rows = rows.into_iter().map(|row| table_row(row, &columns, now));
     let mut failures: Vec<String> = app
         .host_failures()
