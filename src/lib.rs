@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod app;
+pub mod browser;
 pub mod cli;
 pub mod github;
 pub mod model;

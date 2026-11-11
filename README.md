@@ -48,6 +48,7 @@ The footer shows the keys that work on the screen you are on. `?` opens the same
 | `d` | toggle drafts |
 | `Tab` | next tab |
 | `Shift-Tab` | previous tab |
+| `o` | open the pull request in the browser |
 | `?` | help |
 | `q` | quit |
 | `Ctrl-C` | quit |

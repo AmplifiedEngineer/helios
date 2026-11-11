@@ -4,6 +4,7 @@
 mod support;
 
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -325,4 +326,43 @@ fn two_accounts_both_show_their_rows() {
 
     // Assert
     assert_eq!(harness.screen().matches("Mine one").count(), 2);
+}
+
+fn record_opened_urls(harness: &mut Harness) -> Arc<Mutex<Vec<String>>> {
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&opened);
+    harness.session.set_opener(Box::new(move |url| {
+        sink.lock().expect("sink lock").push(url.to_owned())
+    }));
+    opened
+}
+
+#[test]
+fn o_opens_the_pr_under_the_cursor_and_the_open_pr_in_the_browser() {
+    // Arrange
+    let mut harness = Harness::start(FakeApi::new());
+    let opened = record_opened_urls(&mut harness);
+
+    // Act
+    harness.type_char('j');
+    harness.type_char('o');
+    harness.press(KeyCode::Enter);
+    harness.press(KeyCode::Char('o'));
+
+    // Assert
+    let urls = opened.lock().expect("sink lock").clone();
+    assert_eq!(urls, vec!["https://github.com/org/repo/pull/2"; 2]);
+}
+
+#[test]
+fn o_does_nothing_on_an_empty_list() {
+    // Arrange
+    let mut harness = Harness::start_unsettled(Vec::new());
+    let opened = record_opened_urls(&mut harness);
+
+    // Act
+    harness.type_char('o');
+
+    // Assert
+    assert!(opened.lock().expect("sink lock").is_empty());
 }

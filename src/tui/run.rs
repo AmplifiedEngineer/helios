@@ -4,6 +4,7 @@
 
 use std::io;
 use std::sync::mpsc::Receiver;
+use std::thread;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyEventKind};
@@ -14,6 +15,7 @@ use crate::app::loader::Loader;
 use crate::app::refresh::{Clock, Scheduler};
 use crate::app::worker::Message;
 use crate::app::{App, ListView, Screen};
+use crate::browser;
 use crate::github::errors::GithubError;
 use crate::github::GithubApi;
 use crate::tui::draw::draw_with;
@@ -48,6 +50,20 @@ pub enum Flow {
     Quit,
 }
 
+/// What the loop calls with the address of a pull request to show it in a browser.
+pub type Opener = Box<dyn FnMut(&str)>;
+
+/// Opens the address with the system opener on its own thread, so the loop never waits for it.
+fn system_opener() -> Opener {
+    Box::new(|url| {
+        let url = url.to_owned();
+        thread::spawn(move || {
+            // The browser either opens or it does not; the screen has no place to report it.
+            let _ = browser::open(&url);
+        });
+    })
+}
+
 /// Everything one run of the loop owns.
 pub struct Session<B: Backend, E, C: Clock, A> {
     terminal: Terminal<B>,
@@ -57,6 +73,7 @@ pub struct Session<B: Backend, E, C: Clock, A> {
     scheduler: Scheduler<C>,
     loader: Loader<A>,
     results: Receiver<Message>,
+    opener: Opener,
     dirty: bool,
 }
 
@@ -86,10 +103,16 @@ where
             scheduler,
             loader,
             results,
+            opener: system_opener(),
             dirty: true,
         };
         session.start_refresh();
         session
+    }
+
+    /// Replaces the browser opener, for a test.
+    pub fn set_opener(&mut self, opener: Opener) {
+        self.opener = opener;
     }
 
     pub fn app(&self) -> &App {
@@ -141,6 +164,13 @@ where
         match handle_key(&mut self.app, key) {
             Outcome::Continue => Flow::Running,
             Outcome::Quit => Flow::Quit,
+            Outcome::OpenInBrowser => {
+                let url = self.app.current_pr().and_then(browser::pr_url);
+                if let Some(url) = url {
+                    (self.opener)(&url);
+                }
+                Flow::Running
+            }
             Outcome::Refresh => {
                 if self.scheduler.manual() {
                     self.start_refresh();

@@ -109,6 +109,11 @@ pub const BINDINGS: &[Binding] = &[
         scopes: &[Scope::Detail, Scope::Files],
     },
     Binding {
+        key: "o",
+        action: "open in browser",
+        scopes: ANYWHERE,
+    },
+    Binding {
         key: "?",
         action: "help",
         scopes: ANYWHERE,
@@ -132,6 +137,8 @@ pub enum Outcome {
     Quit,
     /// Reload both lists now.
     Refresh,
+    /// Open the current pull request in the web browser.
+    OpenInBrowser,
 }
 
 fn step_for(code: KeyCode) -> Option<Step> {
@@ -163,6 +170,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Outcome {
             app.show_help = true;
             return Outcome::Continue;
         }
+        KeyCode::Char('o') => return Outcome::OpenInBrowser,
         _ => {}
     }
     match Scope::of(app) {

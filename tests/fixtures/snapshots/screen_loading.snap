@@ -10,5 +10,7 @@ Loading...
 
 
 
-j/k move  g/G first/last  Enter open  m mine/needs me  r refresh  d toggle drafts  ? help  q quit
-Ctrl-C quit
+
+
+j/k move  g/G first/last  Enter open  m mine/needs me  r refresh  d toggle drafts  o open in browser
+? help  q quit  Ctrl-C quit
