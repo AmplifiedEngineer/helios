@@ -4,9 +4,9 @@
 
 use std::future::Future;
 
-use crate::model::{ChangedFile, PrDetail};
+use crate::model::PrDetail;
 use errors::GithubError;
-use queries::{ListKind, Listing};
+use queries::{FilesListing, ListKind, Listing};
 
 pub mod errors;
 pub mod octo;
@@ -29,5 +29,5 @@ pub trait GithubApi: Send + Sync {
         owner: &str,
         repo: &str,
         number: u64,
-    ) -> impl Future<Output = Result<Vec<ChangedFile>, GithubError>> + Send;
+    ) -> impl Future<Output = Result<FilesListing, GithubError>> + Send;
 }

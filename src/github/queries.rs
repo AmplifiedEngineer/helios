@@ -94,6 +94,14 @@ pub struct Listing {
     pub partial: bool,
 }
 
+/// The changed files read for a pull request, and whether GitHub had more than the cap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilesListing {
+    pub files: Vec<ChangedFile>,
+    /// The page cap cut the list short, so the pull request has more files than shown.
+    pub truncated: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ListError {

@@ -18,9 +18,9 @@ use helios::app::loader::{Loader, Source};
 use helios::app::refresh::Clock;
 use helios::app::App;
 use helios::github::errors::GithubError;
-use helios::github::queries::{ListKind, Listing};
+use helios::github::queries::{FilesListing, ListKind, Listing};
 use helios::github::GithubApi;
-use helios::model::{ChangedFile, PrDetail, PrKey, PrState, PrSummary, ReviewDecision};
+use helios::model::{PrDetail, PrKey, PrState, PrSummary, ReviewDecision};
 use helios::sanitize::sanitize;
 use helios::tui::run::{EventSource, Flow, Session};
 use ratatui::backend::TestBackend;
@@ -150,12 +150,15 @@ impl GithubApi for FakeApi {
         _owner: &str,
         _repo: &str,
         _number: u64,
-    ) -> Result<Vec<ChangedFile>, GithubError> {
+    ) -> Result<FilesListing, GithubError> {
         Self::fail(self.detail_failure)?;
-        Ok(vec![
-            patch_file("src/a.rs", "added in a"),
-            patch_file("src/b.rs", "added in b"),
-        ])
+        Ok(FilesListing {
+            files: vec![
+                patch_file("src/a.rs", "added in a"),
+                patch_file("src/b.rs", "added in b"),
+            ],
+            truncated: false,
+        })
     }
 }
 
