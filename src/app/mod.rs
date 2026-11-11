@@ -8,6 +8,7 @@ use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
 use worker::Loaded;
 
+pub mod loader;
 mod nav;
 pub mod refresh;
 pub mod worker;

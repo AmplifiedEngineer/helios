@@ -6,7 +6,7 @@ helios is planned as a terminal UI. It will list your own pull requests and the 
 
 ## Status
 
-Release 1 is in progress. It is not released yet. The terminal UI draws one empty frame and exits, so it does not list pull requests yet. `--smoke` works: it queries your accounts and prints the counts. helios never writes to GitHub.
+Release 1 is in progress. It is not released yet. The terminal UI works: it lists your pull requests and the ones that need you from every `gh` account, opens a pull request with its tabs, files and diffs, and refreshes every 120 seconds. `--smoke` queries your accounts and prints the counts. helios never writes to GitHub.
 
 ## Requirements
 

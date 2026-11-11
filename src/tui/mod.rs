@@ -7,6 +7,7 @@ pub mod keys;
 pub mod list;
 pub mod mine;
 pub mod needs_me;
+pub mod run;
 
 pub use draw::{draw, draw_with, SystemClock};
 

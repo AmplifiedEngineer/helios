@@ -6,10 +6,15 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use helios::accounts;
+use helios::app::loader::{Loader, Source};
+use helios::app::App;
 use helios::cli::{self, Config};
 use helios::github::octo::{api_base, GhTokens, Octo, REQUEST_TIMEOUT};
 use helios::smoke::{self, SmokeAccount};
-use helios::tui;
+use helios::tui::run::{Session, TerminalEvents};
+use helios::tui::{self, SystemClock};
+
+const ACCOUNTS_FAILED_PREFIX: &str = "Could not read the gh accounts: ";
 
 #[cfg(debug_assertions)]
 fn debug_hooks(config: &Config) -> (bool, bool) {
@@ -21,18 +26,17 @@ fn debug_hooks(_config: &Config) -> (bool, bool) {
     (false, false)
 }
 
-fn run(config: &Config) -> io::Result<()> {
-    tui::install_panic_hook();
-    let (fake_accounts, panic_during_draw) = debug_hooks(config);
-    let mut terminal = tui::init_terminal(fake_accounts)?;
-    let drawn = tui::draw_first_frame(&mut terminal, panic_during_draw);
-    tui::restore_terminal();
-    drawn
+/// One `gh` account and the client for its host.
+struct Client {
+    host: String,
+    login: String,
+    api: Octo,
 }
 
-fn smoke_run(config: &Config) -> Result<smoke::Outcome, String> {
+/// A client for every account `gh` knows on a host the config includes.
+fn build_clients(config: &Config) -> Result<Vec<Client>, String> {
     let found = accounts::list(&config.gh_program, REQUEST_TIMEOUT).map_err(|e| e.to_string())?;
-    let mut entries = Vec::new();
+    let mut clients = Vec::new();
     for account in found.iter().filter(|a| config.includes_host(&a.host)) {
         let tokens = GhTokens {
             program: config.gh_program.clone(),
@@ -47,12 +51,57 @@ fn smoke_run(config: &Config) -> Result<smoke::Outcome, String> {
             Arc::new(tokens),
         )
         .map_err(|e| e.to_string())?;
-        entries.push(SmokeAccount {
+        clients.push(Client {
             host: account.host.clone(),
-            account: account.login.clone(),
+            login: account.login.clone(),
             api,
         });
     }
+    Ok(clients)
+}
+
+fn run(config: &Config) -> io::Result<()> {
+    tui::install_panic_hook();
+    let (fake_accounts, panic_during_draw) = debug_hooks(config);
+    let runtime = tokio::runtime::Runtime::new()?;
+    let mut app = App::new();
+    app.show_drafts = config.drafts;
+    let clients = if fake_accounts {
+        Vec::new()
+    } else {
+        build_clients(config).unwrap_or_else(|message| {
+            app.set_notice(format!("{ACCOUNTS_FAILED_PREFIX}{message}"));
+            Vec::new()
+        })
+    };
+    let sources = clients
+        .into_iter()
+        .map(|client| Source {
+            host: client.host,
+            login: client.login,
+            api: Arc::new(client.api),
+        })
+        .collect();
+    let (loader, results) = Loader::new(runtime.handle().clone(), sources);
+    let mut terminal = tui::init_terminal(fake_accounts)?;
+    if panic_during_draw {
+        tui::draw_first_frame(&mut terminal, true)?;
+    }
+    let mut session = Session::new(terminal, app, TerminalEvents, SystemClock, loader, results);
+    let outcome = session.run();
+    tui::restore_terminal();
+    outcome
+}
+
+fn smoke_run(config: &Config) -> Result<smoke::Outcome, String> {
+    let entries: Vec<SmokeAccount<Octo>> = build_clients(config)?
+        .into_iter()
+        .map(|client| SmokeAccount {
+            host: client.host,
+            account: client.login,
+            api: client.api,
+        })
+        .collect();
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     Ok(runtime.block_on(smoke::run(&entries, config.drafts)))
 }
