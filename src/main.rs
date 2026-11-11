@@ -7,11 +7,9 @@ use std::sync::Arc;
 
 use helios::accounts;
 use helios::cli::{self, Config};
-use helios::github::octo::{GhTokens, Octo, DEFAULT_BASE_URI, REQUEST_TIMEOUT};
+use helios::github::octo::{api_base, GhTokens, Octo, REQUEST_TIMEOUT};
 use helios::smoke::{self, SmokeAccount};
 use helios::tui;
-
-const GITHUB_COM: &str = "github.com";
 
 #[cfg(debug_assertions)]
 fn debug_hooks(config: &Config) -> (bool, bool) {
@@ -32,22 +30,10 @@ fn run(config: &Config) -> io::Result<()> {
     drawn
 }
 
-/// Base URI of the REST and GraphQL API for `host`.
-fn api_base(host: &str) -> String {
-    if host == GITHUB_COM {
-        DEFAULT_BASE_URI.to_string()
-    } else {
-        format!("https://{host}/api/v3")
-    }
-}
-
 fn smoke_run(config: &Config) -> Result<smoke::Outcome, String> {
     let found = accounts::list(&config.gh_program, REQUEST_TIMEOUT).map_err(|e| e.to_string())?;
     let mut entries = Vec::new();
-    for account in found
-        .iter()
-        .filter(|a| config.hosts.is_empty() || config.hosts.contains(&a.host))
-    {
+    for account in found.iter().filter(|a| config.includes_host(&a.host)) {
         let tokens = GhTokens {
             program: config.gh_program.clone(),
             host: account.host.clone(),
@@ -68,7 +54,7 @@ fn smoke_run(config: &Config) -> Result<smoke::Outcome, String> {
         });
     }
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-    Ok(runtime.block_on(smoke::run(&entries, config)))
+    Ok(runtime.block_on(smoke::run(&entries, config.drafts)))
 }
 
 fn smoke_main(config: &Config) -> ExitCode {

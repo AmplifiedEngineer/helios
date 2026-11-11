@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::github::errors::GithubError;
-use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary};
+use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
 use worker::Loaded;
 
 pub mod refresh;
@@ -54,6 +54,19 @@ pub enum ListFilter {
     Assigned,
 }
 
+/// The host and login of one account.
+pub type AccountKey = (String, String);
+
+impl ListFilter {
+    fn matches(self, row: &PrSummary) -> bool {
+        match self {
+            Self::All => true,
+            Self::Review => row.tags.contains(&Tag::Review),
+            Self::Assigned => row.tags.contains(&Tag::Assigned),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct App {
     pub screen: Screen,
@@ -67,7 +80,7 @@ pub struct App {
     generation: u64,
     cursor: usize,
     rows: Vec<PrSummary>,
-    host_failures: BTreeMap<String, GithubError>,
+    host_failures: BTreeMap<AccountKey, GithubError>,
 }
 
 impl DetailTab {
@@ -123,8 +136,18 @@ impl App {
         &self.rows
     }
 
-    /// The hosts whose latest load failed, by host name.
-    pub fn host_failures(&self) -> &BTreeMap<String, GithubError> {
+    /// The rows the list shows: drafts only when on, and with `by_tag` only the rows the
+    /// filter selects.
+    pub fn visible_rows(&self, by_tag: bool) -> Vec<&PrSummary> {
+        self.rows
+            .iter()
+            .filter(|row| row.is_visible(self.show_drafts))
+            .filter(|row| !by_tag || self.filter.matches(row))
+            .collect()
+    }
+
+    /// The accounts whose latest load failed, by host and login.
+    pub fn host_failures(&self) -> &BTreeMap<AccountKey, GithubError> {
         &self.host_failures
     }
 
@@ -137,6 +160,11 @@ impl App {
     /// The loads asked for and not yet taken by the event loop.
     pub fn requests(&self) -> &[LoadRequest] {
         &self.requests
+    }
+
+    /// Hands the pending loads to the event loop, so none runs twice.
+    pub fn take_requests(&mut self) -> Vec<LoadRequest> {
+        std::mem::take(&mut self.requests)
     }
 
     /// Keeps the changed files of the open pull request for the Files tab.
@@ -192,7 +220,16 @@ impl App {
             return;
         }
         self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
-        self.selected = self.cursor().cloned();
+        match self.cursor().cloned() {
+            Some(key) => self.select(key),
+            None => self.clear_selection(),
+        }
+    }
+
+    fn clear_selection(&mut self) {
+        self.selected = None;
+        self.detail = DetailState::Loading;
+        self.files = None;
     }
 
     /// Returns whether the result was applied.
@@ -202,12 +239,16 @@ impl App {
         }
         match loaded.result {
             Ok(rows) => {
-                self.host_failures.remove(&loaded.host);
-                self.rows = rows;
+                self.host_failures
+                    .remove(&(loaded.host.clone(), loaded.account.clone()));
+                self.rows
+                    .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
+                self.rows.extend(rows);
                 self.restore_cursor();
             }
             Err(error) => {
-                self.host_failures.insert(loaded.host, error);
+                self.host_failures
+                    .insert((loaded.host, loaded.account), error);
             }
         }
         true

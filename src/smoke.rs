@@ -2,7 +2,6 @@
 
 //! `--smoke`: query every account once and print the list counts.
 
-use crate::cli::Config;
 use crate::github::errors::GithubError;
 use crate::github::queries::{filter_drafts, merge_needs_me, ListKind};
 use crate::github::GithubApi;
@@ -45,7 +44,7 @@ async fn count_account<A: GithubApi>(api: &A, show_drafts: bool) -> Result<Count
 }
 
 /// Counts the lists over every account that answers; a failing host is named, not fatal.
-pub async fn run<A: GithubApi>(accounts: &[SmokeAccount<A>], config: &Config) -> Outcome {
+pub async fn run<A: GithubApi>(accounts: &[SmokeAccount<A>], show_drafts: bool) -> Outcome {
     if accounts.is_empty() {
         return Outcome {
             text: format!("{NO_ACCOUNTS}\n"),
@@ -55,7 +54,7 @@ pub async fn run<A: GithubApi>(accounts: &[SmokeAccount<A>], config: &Config) ->
     let mut text = String::new();
     let (mut mine, mut needs_me, mut succeeded) = (0, 0, 0);
     for entry in accounts {
-        match count_account(&entry.api, config.drafts).await {
+        match count_account(&entry.api, show_drafts).await {
             Ok(counts) => {
                 mine += counts.mine;
                 needs_me += counts.needs_me;

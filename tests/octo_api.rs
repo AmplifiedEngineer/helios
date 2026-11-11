@@ -143,3 +143,45 @@ async fn octo_files_returns_the_mapped_files() {
     // Assert
     assert_eq!(files, expected);
 }
+
+#[tokio::test]
+async fn octo_detail_of_a_hidden_or_missing_pull_request_is_not_found() {
+    for data in [
+        r#"{"repository":null}"#,
+        r#"{"repository":{"pullRequest":null}}"#,
+    ] {
+        // Arrange
+        let body = format!(
+            r#"{{"data":{data},"errors":[{{"type":"NOT_FOUND","message":"Could not resolve"}}]}}"#
+        );
+        let server = TestServer::start(ScriptedResponse::json(OK, &body));
+        let api = octo(&server);
+
+        // Act
+        let result = api.detail(OWNER, REPO, NUMBER).await;
+
+        // Assert
+        assert!(
+            matches!(result, Err(GithubError::NotFoundOrHidden)),
+            "{data}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn api_base_picks_the_endpoint_for_each_kind_of_host() {
+    // Arrange
+    let cases = [
+        ("github.com", "https://api.github.com"),
+        ("acme.ghe.com", "https://api.acme.ghe.com"),
+        ("ghe.example.com", "https://ghe.example.com/api/v3"),
+    ];
+
+    for (host, expected) in cases {
+        // Act
+        let base = helios::github::octo::api_base(host);
+
+        // Assert
+        assert_eq!(base, expected, "{host}");
+    }
+}

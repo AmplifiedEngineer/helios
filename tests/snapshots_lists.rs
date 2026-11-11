@@ -10,11 +10,12 @@ use helios::app::{App, ListFilter};
 use helios::github::errors::GithubError;
 use helios::github::queries::{map_page, merge_needs_me};
 use helios::model::PrSummary;
-use helios::tui::needs_me;
+use helios::tui::{mine, needs_me};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::fs;
 use std::time::SystemTime;
+use support::render::buffer_text;
 use support::snapshot::assert_snapshot;
 
 const HOST: &str = "github.com";
@@ -69,16 +70,7 @@ fn render_needs_me(app: &App) -> String {
     terminal
         .draw(|frame| needs_me::render(frame, frame.area(), app, &FixedClock))
         .expect("draw");
-    terminal
-        .backend()
-        .buffer()
-        .content()
-        .chunks(usize::from(SCREEN_WIDTH))
-        .map(|row| {
-            let line: String = row.iter().map(|cell| cell.symbol()).collect();
-            format!("{}\n", line.trim_end())
-        })
-        .collect()
+    buffer_text(terminal.backend().buffer())
 }
 
 fn assert_shows(screen: &str, titles: &[&str]) {
@@ -281,4 +273,30 @@ fn failed_host_shows_its_state_while_the_other_host_rows_stay() {
     assert_shows(&screen, &ASSIGNED_TITLES);
     assert_shows(&screen, &[DOWN_HOST, "could not reach GitHub"]);
     assert_snapshot("needs_me_partial_host", &screen);
+}
+
+#[test]
+fn the_mine_view_ignores_the_tag_filter_and_shows_every_row() {
+    // Arrange: a Review filter would hide the assigned rows on the Needs me list
+    let mut app = needs_me_app();
+    app.cycle_filter();
+    assert_eq!(app.filter, ListFilter::Review);
+    let mut terminal =
+        Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+
+    // Act
+    terminal
+        .draw(|frame| mine::render(frame, frame.area(), &app, &FixedClock))
+        .expect("draw");
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+
+    // Assert
+    assert_shows(&screen, &REVIEW_TITLES);
+    assert_shows(&screen, &ASSIGNED_TITLES);
 }

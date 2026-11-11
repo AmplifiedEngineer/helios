@@ -12,18 +12,13 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use helios::accounts::{Account, AccountState};
 use helios::github::errors::GithubError;
 use helios::github::octo::{
     GraphqlResponse, Octo, TokenSource, DEFAULT_BASE_URI, DEFAULT_RATE_LIMIT_BACKOFF, ENDPOINTS,
 };
 use helios::secret::Secret;
+use support::github::{account, planted_token, FixedToken};
 use support::server::{ScriptedResponse, TestServer};
-
-/// Planted token, built at runtime so no token-shaped literal sits in the source.
-fn planted_token() -> String {
-    format!("{}_{}", "tok", "planted")
-}
 
 const QUERY: &str = "{ viewer { login } }";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -49,24 +44,6 @@ const RETRY_AFTER_SECS: u64 = 120;
 /// Differs from the reset time, so a test shows which header won.
 const REQUEST_ID: &str = "ABCD:1234:5678";
 
-struct FixedToken(String);
-
-impl TokenSource for FixedToken {
-    fn fetch(&self) -> Result<Secret, GithubError> {
-        Ok(Secret::new(self.0.clone()))
-    }
-}
-
-fn account() -> Account {
-    Account {
-        host: "github.test".into(),
-        login: "octo".into(),
-        active: true,
-        scopes: vec![],
-        state: AccountState::Success,
-    }
-}
-
 async fn call(response: ScriptedResponse) -> Result<GraphqlResponse, GithubError> {
     let server = TestServer::start(response);
     let token = Arc::new(FixedToken(planted_token()));
@@ -76,7 +53,11 @@ async fn call(response: ScriptedResponse) -> Result<GraphqlResponse, GithubError
 }
 
 fn graphql_error_body(kind: &str) -> String {
-    format!(r#"{{"data":null,"errors":[{{"type":"{kind}","message":"nope"}}]}}"#)
+    graphql_error_with(kind, "nope")
+}
+
+fn graphql_error_with(kind: &str, message: &str) -> String {
+    format!(r#"{{"data":null,"errors":[{{"type":"{kind}","message":"{message}"}}]}}"#)
 }
 
 #[tokio::test]
@@ -143,7 +124,11 @@ async fn status_403_with_the_sso_header_is_sso_blocked() {
 #[tokio::test]
 async fn graphql_forbidden_error_is_sso_blocked() {
     // Arrange
-    let response = ScriptedResponse::json(200, &graphql_error_body("FORBIDDEN"));
+    let body = graphql_error_with(
+        "FORBIDDEN",
+        "Resource protected by organization SAML enforcement",
+    );
+    let response = ScriptedResponse::json(200, &body);
 
     // Act
     let result = call(response).await;
@@ -504,4 +489,60 @@ async fn a_stalled_socket_times_out_within_the_slack() {
     // Assert
     assert!(matches!(result, Err(GithubError::Timeout)), "{result:?}");
     assert!(elapsed < SHORT_TIMEOUT + TIMEOUT_SLACK, "took {elapsed:?}");
+}
+
+#[tokio::test]
+async fn graphql_forbidden_without_saml_is_permission_denied() {
+    // Arrange
+    let body = graphql_error_with(
+        "FORBIDDEN",
+        "Resource not accessible by personal access token",
+    );
+    let response = ScriptedResponse::json(200, &body);
+
+    // Act
+    let result = call(response).await;
+
+    // Assert
+    assert!(
+        matches!(result, Err(GithubError::PermissionDenied)),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_403_naming_a_secondary_rate_limit_is_rate_limited() {
+    // Arrange
+    let response = ScriptedResponse::json(
+        403,
+        r#"{"message":"You have exceeded a secondary rate limit. Please wait."}"#,
+    );
+    let before = SystemTime::now();
+
+    // Act
+    let result = call(response).await;
+
+    // Assert
+    let Err(GithubError::RateLimited { retry_at }) = result else {
+        panic!("expected RateLimited, got {result:?}");
+    };
+    assert!(retry_at >= before + DEFAULT_RATE_LIMIT_BACKOFF);
+}
+
+#[tokio::test]
+async fn an_enormous_retry_after_or_reset_does_not_panic() {
+    for header in ["retry-after", "x-ratelimit-reset"] {
+        // Arrange
+        let response = ScriptedResponse::json(429, r#"{"message":"slow down"}"#)
+            .with_header(header, &u64::MAX.to_string());
+
+        // Act
+        let result = call(response).await;
+
+        // Assert
+        assert!(
+            matches!(result, Err(GithubError::RateLimited { .. })),
+            "{header}: {result:?}"
+        );
+    }
 }

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
-
 use chrono::{TimeZone, Utc};
-use helios::cli::{self, Config};
 use helios::github::errors::GithubError;
 use helios::github::queries::ListKind;
 use helios::github::GithubApi;
@@ -15,6 +12,7 @@ const ACCOUNT: &str = "octo";
 const REPO: &str = "org/repo";
 const HOST_A: &str = "github.com";
 const HOST_B: &str = "ghe.example.com";
+const SHOW_DRAFTS: bool = false;
 const EXIT_FAILURE: i32 = 1;
 const EXIT_SUCCESS: i32 = 0;
 
@@ -99,10 +97,6 @@ fn failing(host: &str) -> SmokeAccount<FakeApi> {
     )
 }
 
-fn config() -> Config {
-    cli::parse(&[], &HashMap::new()).expect("defaults parse")
-}
-
 #[tokio::test]
 async fn smoke_prints_the_mine_and_needs_me_counts() {
     // Arrange
@@ -130,7 +124,7 @@ async fn smoke_prints_the_mine_and_needs_me_counts() {
     ];
 
     // Act
-    let outcome = smoke::run(&accounts, &config()).await;
+    let outcome = smoke::run(&accounts, SHOW_DRAFTS).await;
 
     // Assert
     let lines: Vec<&str> = outcome.text.lines().collect();
@@ -155,7 +149,7 @@ async fn smoke_reports_a_failing_host_and_counts_the_other() {
     ];
 
     // Act
-    let outcome = smoke::run(&accounts, &config()).await;
+    let outcome = smoke::run(&accounts, SHOW_DRAFTS).await;
 
     // Assert
     let lines: Vec<&str> = outcome.text.lines().collect();
@@ -175,7 +169,7 @@ async fn smoke_exits_with_failure_when_every_host_fails() {
     let accounts = [failing(HOST_A), failing(HOST_B)];
 
     // Act
-    let outcome = smoke::run(&accounts, &config()).await;
+    let outcome = smoke::run(&accounts, SHOW_DRAFTS).await;
 
     // Assert
     assert!(outcome.text.contains(&format!("Host failed: {HOST_A}")));
@@ -189,7 +183,7 @@ async fn smoke_strips_escapes_from_a_host_name() {
     let accounts = [failing("evil\u{1b}[31m.example.com")];
 
     // Act
-    let outcome = smoke::run(&accounts, &config()).await;
+    let outcome = smoke::run(&accounts, SHOW_DRAFTS).await;
 
     // Assert
     assert!(!outcome.text.contains('\u{1b}'), "got {:?}", outcome.text);
@@ -202,7 +196,7 @@ async fn smoke_with_no_accounts_exits_with_failure() {
     let accounts: [SmokeAccount<FakeApi>; 0] = [];
 
     // Act
-    let outcome = smoke::run(&accounts, &config()).await;
+    let outcome = smoke::run(&accounts, SHOW_DRAFTS).await;
 
     // Assert
     assert!(
@@ -211,4 +205,25 @@ async fn smoke_with_no_accounts_exits_with_failure() {
         outcome.text
     );
     assert_eq!(outcome.exit_code, EXIT_FAILURE);
+}
+
+#[tokio::test]
+async fn smoke_counts_drafts_only_when_asked() {
+    // Arrange
+    let accounts = [account(
+        HOST_A,
+        FakeApi {
+            mine: vec![10],
+            drafts_in_mine: vec![12],
+            ..FakeApi::default()
+        },
+    )];
+
+    // Act
+    let hidden = smoke::run(&accounts, false).await;
+    let shown = smoke::run(&accounts, true).await;
+
+    // Assert
+    assert!(hidden.text.contains("Mine: 1"), "got {:?}", hidden.text);
+    assert!(shown.text.contains("Mine: 2"), "got {:?}", shown.text);
 }

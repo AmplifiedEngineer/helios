@@ -353,7 +353,7 @@ impl Pager {
 
 pub fn filter_drafts(rows: Vec<PrSummary>, show_drafts: bool) -> Vec<PrSummary> {
     rows.into_iter()
-        .filter(|row| show_drafts || !row.is_draft)
+        .filter(|row| row.is_visible(show_drafts))
         .collect()
 }
 
@@ -430,18 +430,20 @@ pub const DETAIL_QUERY: &str = r#"query($owner: String!, $repo: String!, $number
       labels(first: 50) { nodes { name } }
       reviewRequests(first: 50) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { name } } } }
       reviewDecision
-      comments(first: 100) { nodes { author { login } body createdAt } }
+      comments(first: 100) { totalCount nodes { author { login } body createdAt } }
       reviewThreads(first: 100) {
+        totalCount
         nodes {
           isResolved path line
           comments(first: 50) { nodes { author { login } body createdAt } }
         }
       }
       commits(first: 100) {
+        totalCount
         nodes { commit { oid messageHeadline committedDate author { name user { login } } } }
       }
       checkRuns: commits(last: 1) {
-        nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl } } } } } }
+        nodes { commit { statusCheckRollup { contexts(first: 100) { totalCount nodes { __typename ... on CheckRun { name status conclusion detailsUrl } } } } } }
       }
     }
   }
@@ -496,6 +498,15 @@ struct DetailNode {
 #[derive(Deserialize)]
 struct Nodes<T> {
     nodes: Vec<T>,
+    #[serde(default, rename = "totalCount")]
+    total_count: usize,
+}
+
+impl<T> Nodes<T> {
+    /// Whether GitHub reported more items than the page holds.
+    fn is_cut(&self) -> bool {
+        self.total_count > self.nodes.len()
+    }
 }
 
 #[derive(Deserialize)]
@@ -691,7 +702,17 @@ fn reviewer_name(reviewer: Reviewer) -> Option<Remote> {
 pub fn map_detail(json: &str) -> Result<PrDetail, DetailError> {
     let response: DetailResponse = serde_json::from_str(json).map_err(|_| DetailError::Parse)?;
     let pr = response.data.repository.pull_request;
+    let partial = pr.comments.is_cut()
+        || pr.review_threads.is_cut()
+        || pr.commits.is_cut()
+        || pr.check_runs.nodes.iter().any(|node| {
+            node.commit
+                .status_check_rollup
+                .as_ref()
+                .is_some_and(|rollup| rollup.contexts.is_cut())
+        });
     Ok(PrDetail {
+        partial,
         title: sanitize(&pr.title),
         body: sanitize(&pr.body),
         state: pr_state(&pr.state),

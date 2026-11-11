@@ -16,6 +16,7 @@ use std::time::SystemTime;
 
 #[allow(dead_code)]
 mod support;
+use support::render::{buffer_text, line_with};
 use support::snapshot::assert_snapshot;
 
 const HOST: &str = "github.com";
@@ -71,29 +72,13 @@ fn render_detail(app: &App) -> String {
     terminal
         .draw(|frame| detail::render(frame, frame.area(), app, &FixedClock))
         .expect("draw");
-    terminal
-        .backend()
-        .buffer()
-        .content()
-        .chunks(usize::from(SCREEN_WIDTH))
-        .map(|row| {
-            let line: String = row.iter().map(|cell| cell.symbol()).collect();
-            format!("{}\n", line.trim_end())
-        })
-        .collect()
+    buffer_text(terminal.backend().buffer())
 }
 
 fn position(screen: &str, needle: &str) -> usize {
     screen
         .find(needle)
         .unwrap_or_else(|| panic!("the screen lacks {needle:?}:\n{screen}"))
-}
-
-fn line_with<'a>(screen: &'a str, needle: &str) -> &'a str {
-    screen
-        .lines()
-        .find(|line| line.contains(needle))
-        .unwrap_or_else(|| panic!("no line holds {needle:?}:\n{screen}"))
 }
 
 #[test]
@@ -384,4 +369,39 @@ fn opening_a_pull_request_shows_loading_and_requests_one_detail_load() {
     assert!(matches!(app.detail(), DetailState::Loading));
     assert_eq!(app.selected, Some(other.clone()));
     assert_eq!(app.requests(), [LoadRequest::Detail(other)]);
+}
+
+const PARTIAL_NOTE: &str = "Some items are not shown";
+
+#[test]
+fn a_partial_detail_says_so_on_the_list_tabs() {
+    // Arrange
+    let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
+    let mut value: serde_json::Value = serde_json::from_str(&json).expect("fixture json");
+    value["data"]["repository"]["pullRequest"]["commits"]["totalCount"] = 10_000.into();
+    let detail = map_detail(&value.to_string()).expect("map the detail");
+    let key = PrKey {
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        repo: REPO.into(),
+        number: PR_NUMBER,
+    };
+    let mut app = App::new();
+    app.select(key.clone());
+    app.apply_detail(&key, Ok(detail));
+
+    for tab in [
+        DetailTab::Conversation,
+        DetailTab::Commits,
+        DetailTab::Checks,
+    ] {
+        // Act
+        app.tab = tab;
+        let screen = render_detail(&app);
+
+        // Assert
+        assert!(screen.contains(PARTIAL_NOTE), "{tab:?}:\n{screen}");
+    }
+    app.tab = DetailTab::Overview;
+    assert!(!render_detail(&app).contains(PARTIAL_NOTE));
 }

@@ -2,6 +2,8 @@
 
 //! Characterisation of octocrab 0.54.9 behaviour that the client design relies on.
 
+// The shared support has helpers this file does not use.
+#[allow(dead_code)]
 mod support;
 
 use std::io::{Read, Write};

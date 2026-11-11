@@ -85,6 +85,13 @@ pub struct PrSummary {
     pub check_state: Option<CheckState>,
 }
 
+impl PrSummary {
+    /// Whether the row shows: a draft shows only when drafts are on.
+    pub fn is_visible(&self, show_drafts: bool) -> bool {
+        show_drafts || !self.is_draft
+    }
+}
+
 /// Why a changed file has no diff to show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -95,7 +102,8 @@ pub enum DiffGap {
     Binary,
     /// The file was renamed with no content change.
     RenamedOnly,
-    /// The file is new and empty.
+    /// No patch and no changes: an empty or binary file that was added or removed, or a mode-only
+    /// change. The REST entry cannot tell these apart.
     Empty,
 }
 
@@ -194,4 +202,6 @@ pub struct PrDetail {
     pub threads: Vec<ReviewThread>,
     pub commits: Vec<CommitSummary>,
     pub check_runs: Vec<CheckRun>,
+    /// GitHub holds more comments, threads, commits or checks than were fetched.
+    pub partial: bool,
 }
