@@ -12,6 +12,8 @@ use crate::model::{ChangedFile, DiffGap, FileDiff};
 
 const HEADER_HEIGHT: u16 = 1;
 const GUTTER_WIDTH: usize = 4;
+/// Two gutters and the space after each.
+const GUTTER_PREFIX_WIDTH: usize = GUTTER_WIDTH * 2 + 2;
 const HUNK_MARKER: &str = "@@";
 const ADD_MARKER: char = '+';
 const DELETE_MARKER: char = '-';
@@ -28,8 +30,10 @@ pub const MAX_DIFF_LINES: usize = 500;
 pub const CUT_LINE: &str = "diff cut: too long to show here, open it on GitHub";
 /// Drawn when GitHub left the patch out because it is too large.
 pub const TRUNCATED_LINE: &str = "diff unavailable: GitHub truncated it, open it on GitHub";
-/// Drawn for a binary file.
-pub const BINARY_LINE: &str = "binary file: no text diff";
+/// Drawn for an added or removed file with no patch and no changes.
+pub const ADDED_OR_REMOVED_NO_TEXT_LINE: &str = "no text diff: empty or binary file";
+/// Drawn for any other file with no patch and no changes.
+pub const CHANGED_NO_TEXT_LINE: &str = "no text diff: binary file or mode change only";
 
 /// How the diff is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +47,8 @@ pub fn render_with(frame: &mut Frame, area: Rect, file: &ChangedFile, options: D
     render_scrolled(frame, area, file, options, 0);
 }
 
-/// Draws the diff of `file` with `options`, starting `scroll` lines down the patch.
+/// Draws the diff of `file` with `options`, starting `scroll` patch lines down; a long line wraps
+/// onto more rows, but it still counts as one line.
 pub fn render_scrolled(
     frame: &mut Frame,
     area: Rect,
@@ -56,9 +61,8 @@ pub fn render_scrolled(
     frame.render_widget(Paragraph::new(file.path.as_str()), header);
     match &file.diff {
         FileDiff::Patch(patch) => {
-            let offset = u16::try_from(scroll).unwrap_or(u16::MAX);
-            let lines = patch_lines(patch.as_str(), options);
-            frame.render_widget(Paragraph::new(lines).scroll((offset, 0)), body);
+            let rows = patch_rows(patch.as_str(), options, usize::from(body.width), scroll);
+            frame.render_widget(Paragraph::new(rows), body);
         }
         FileDiff::Unavailable { gap, .. } => {
             if let Some(line) = gap_line(gap) {
@@ -72,8 +76,9 @@ pub fn render_scrolled(
 fn gap_line(gap: &DiffGap) -> Option<&'static str> {
     match gap {
         DiffGap::Truncated => Some(TRUNCATED_LINE),
-        DiffGap::Binary => Some(BINARY_LINE),
-        _ => None,
+        DiffGap::AddedOrRemovedNoText => Some(ADDED_OR_REMOVED_NO_TEXT_LINE),
+        DiffGap::ChangedNoText => Some(CHANGED_NO_TEXT_LINE),
+        DiffGap::RenamedOnly => None,
     }
 }
 
@@ -82,18 +87,24 @@ pub fn render(frame: &mut Frame, area: Rect, file: &ChangedFile) {
     render_with(frame, area, file, DiffOptions { color: true });
 }
 
-/// The first `MAX_DIFF_LINES` patch lines with their gutters, then the cut line when more follow.
-fn patch_lines(patch: &str, options: DiffOptions) -> Vec<Line<'static>> {
+/// The rows of the first `MAX_DIFF_LINES` patch lines after skipping `scroll` of them, each wrapped
+/// to `width` with its gutters, then the cut line when more follow.
+fn patch_rows(
+    patch: &str,
+    options: DiffOptions,
+    width: usize,
+    scroll: usize,
+) -> Vec<Line<'static>> {
     let mut numbers = LineNumbers::default();
-    let mut lines: Vec<Line> = patch
+    let mut lines: Vec<Vec<Line>> = patch
         .lines()
         .take(MAX_DIFF_LINES)
-        .map(|line| numbers.line(line, options))
+        .map(|line| numbers.line(line, options, width))
         .collect();
     if patch.lines().nth(MAX_DIFF_LINES).is_some() {
-        lines.push(Line::from(CUT_LINE));
+        lines.push(vec![Line::from(CUT_LINE)]);
     }
-    lines
+    lines.into_iter().skip(scroll).flatten().collect()
 }
 
 /// The next old and new line number while walking a patch.
@@ -104,12 +115,17 @@ struct LineNumbers {
 }
 
 impl LineNumbers {
-    fn line(&mut self, text: &str, options: DiffOptions) -> Line<'static> {
+    /// The rows of one patch line: the first carries the numbers, the rest a blank gutter.
+    fn line(&mut self, text: &str, options: DiffOptions, width: usize) -> Vec<Line<'static>> {
         let expanded = text.replace('\t', TAB_SPACES);
         let text = expanded.as_str();
         if text.starts_with(HUNK_MARKER) {
             (self.old, self.new) = hunk_start(text);
-            return Line::styled(text.to_owned(), paint(Some(HUNK_COLOR), options));
+            let style = paint(Some(HUNK_COLOR), options);
+            return wrap(text, width)
+                .into_iter()
+                .map(|row| Line::styled(row, style))
+                .collect();
         }
         let (old, new, color) = if text.starts_with(ADD_MARKER) {
             (None, Some(self.take_new()), Some(ADD_COLOR))
@@ -121,10 +137,20 @@ impl LineNumbers {
             (Some(self.take_old()), Some(self.take_new()), None)
         };
         let style = paint(color, options);
-        Line::from(vec![
-            Span::raw(format!("{} {} ", gutter(old), gutter(new))),
-            Span::styled(text.to_owned(), style),
-        ])
+        let numbers = format!("{} {} ", gutter(old), gutter(new));
+        let blank = " ".repeat(GUTTER_PREFIX_WIDTH);
+        wrap(text, width.saturating_sub(GUTTER_PREFIX_WIDTH))
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let prefix = if index == 0 {
+                    numbers.clone()
+                } else {
+                    blank.clone()
+                };
+                Line::from(vec![Span::raw(prefix), Span::styled(row, style)])
+            })
+            .collect()
     }
 
     fn take_old(&mut self) -> u32 {
@@ -134,6 +160,25 @@ impl LineNumbers {
     fn take_new(&mut self) -> u32 {
         take(&mut self.new)
     }
+}
+
+/// Splits `text` into rows no wider than `width` cells, never inside a glyph. Each row holds at
+/// least one glyph, so a width too small for a wide glyph still makes progress.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for glyph in text.chars() {
+        let glyph_width = Span::raw(glyph.to_string()).width();
+        if used > 0 && used + glyph_width > width {
+            rows.push(String::new());
+            used = 0;
+        }
+        if let Some(row) = rows.last_mut() {
+            row.push(glyph);
+        }
+        used += glyph_width;
+    }
+    rows
 }
 
 /// Returns the counter's current value and advances it.

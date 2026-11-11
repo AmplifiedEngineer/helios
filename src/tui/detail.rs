@@ -27,9 +27,9 @@ const FILES_CUT_NOTE_SUFFIX: &str = "files";
 const FILES_LOADING_TEXT: &str = "Loading files...";
 const MARK_RENAMED_FROM: &str = "renamed from";
 const MARK_TRUNCATED: &str = "truncated";
-const MARK_BINARY: &str = "binary";
+const MARK_CHANGED_NO_TEXT: &str = "binary or mode change";
 const MARK_RENAMED: &str = "renamed";
-const MARK_EMPTY: &str = "empty";
+const MARK_ADDED_OR_REMOVED_NO_TEXT: &str = "empty or binary";
 const SHORT_OID_LEN: usize = 7;
 
 /// Draws the selected tab of the open pull request, with ages measured against `clock`.
@@ -168,10 +168,10 @@ fn file_marks(file: &ChangedFile) -> Vec<String> {
     if let FileDiff::Unavailable { gap, .. } = &file.diff {
         match gap {
             DiffGap::Truncated => marks.push(MARK_TRUNCATED.into()),
-            DiffGap::Binary => marks.push(MARK_BINARY.into()),
             DiffGap::RenamedOnly if file.previous_path.is_none() => marks.push(MARK_RENAMED.into()),
             DiffGap::RenamedOnly => {}
-            DiffGap::Empty => marks.push(MARK_EMPTY.into()),
+            DiffGap::AddedOrRemovedNoText => marks.push(MARK_ADDED_OR_REMOVED_NO_TEXT.into()),
+            DiffGap::ChangedNoText => marks.push(MARK_CHANGED_NO_TEXT.into()),
         }
     }
     marks

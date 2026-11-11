@@ -3,7 +3,8 @@
 use helios::github::queries::map_files;
 use helios::model::ChangedFile;
 use helios::tui::diff::{
-    render_with, DiffOptions, BINARY_LINE, CUT_LINE, MAX_DIFF_LINES, TRUNCATED_LINE,
+    render_scrolled, render_with, DiffOptions, ADDED_OR_REMOVED_NO_TEXT_LINE, CHANGED_NO_TEXT_LINE,
+    CUT_LINE, MAX_DIFF_LINES, TRUNCATED_LINE,
 };
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -176,12 +177,12 @@ fn a_truncated_file_renders_one_fixed_line() {
 
     // Assert
     assert_eq!(screen.matches(TRUNCATED_LINE).count(), 1, "{screen}");
-    assert!(!screen.contains(BINARY_LINE));
+    assert!(!screen.contains(CHANGED_NO_TEXT_LINE));
     assert_snapshot("diff_truncated", &screen);
 }
 
 #[test]
-fn a_binary_file_renders_one_fixed_line() {
+fn a_modified_file_without_text_says_binary_or_mode_change() {
     // Arrange: a modified file with no patch and no counted changes
     let file = file_with(None, "modified", 0);
 
@@ -189,9 +190,28 @@ fn a_binary_file_renders_one_fixed_line() {
     let screen = screen_text(&draw(&file, true, SCREEN_HEIGHT));
 
     // Assert
-    assert_eq!(screen.matches(BINARY_LINE).count(), 1, "{screen}");
+    assert_eq!(screen.matches(CHANGED_NO_TEXT_LINE).count(), 1, "{screen}");
     assert!(!screen.contains(TRUNCATED_LINE));
-    assert_snapshot("diff_binary", &screen);
+    assert_snapshot("diff_changed_no_text", &screen);
+}
+
+#[test]
+fn an_added_or_removed_file_without_text_says_empty_or_binary() {
+    for status in ["added", "removed"] {
+        // Arrange
+        let file = file_with(None, status, 0);
+
+        // Act
+        let screen = screen_text(&draw(&file, true, SCREEN_HEIGHT));
+
+        // Assert
+        assert_eq!(
+            screen.matches(ADDED_OR_REMOVED_NO_TEXT_LINE).count(),
+            1,
+            "{status}: {screen}"
+        );
+        assert!(!screen.contains(CHANGED_NO_TEXT_LINE), "{status}");
+    }
 }
 
 #[test]
@@ -261,4 +281,107 @@ fn tab_indented_code_keeps_its_indent_on_screen() {
         text.contains("+    indented"),
         "tab indent lost on screen:\n{text}"
     );
+}
+
+/// Columns taken by the two line number gutters and their spaces.
+const GUTTER_COLUMNS: usize = 10;
+const TEXT_COLUMNS: usize = SCREEN_WIDTH as usize - GUTTER_COLUMNS;
+const WRAP_ROWS: usize = 3;
+
+fn draw_scrolled(file: &ChangedFile, scroll: usize) -> String {
+    let mut terminal =
+        Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            render_scrolled(
+                frame,
+                frame.area(),
+                file,
+                DiffOptions { color: false },
+                scroll,
+            );
+        })
+        .expect("draw");
+    screen_text(terminal.backend().buffer())
+}
+
+/// The rows after the file header, up to the first blank row.
+fn body_rows(screen: &str) -> Vec<&str> {
+    screen
+        .lines()
+        .skip(1)
+        .take_while(|row| !row.is_empty())
+        .collect()
+}
+
+#[test]
+fn a_line_three_times_the_width_wraps_to_three_rows_with_the_number_on_the_first() {
+    // Arrange: the marker plus filler fills exactly three text areas
+    let long = format!("+{}", "a".repeat(TEXT_COLUMNS * WRAP_ROWS - 1));
+    let file = patch_file(&format!("@@ -1,1 +7,1 @@\n{long}"));
+
+    // Act
+    let screen = screen_text(&draw(&file, false, SCREEN_HEIGHT));
+
+    // Assert: the hunk row, then three rows; only the first carries the number
+    let rows = body_rows(&screen);
+    assert_eq!(rows.len(), 1 + WRAP_ROWS, "{screen}");
+    assert!(rows[1].trim_start().starts_with("7 "), "{screen}");
+    for row in &rows[2..] {
+        assert!(row.starts_with(&" ".repeat(GUTTER_COLUMNS)), "{row:?}");
+        assert_eq!(row.trim_start().len(), TEXT_COLUMNS, "{row:?}");
+    }
+    assert_eq!(screen.matches('a').count(), TEXT_COLUMNS * WRAP_ROWS - 1);
+    assert_snapshot("diff_wrapped", &screen);
+}
+
+#[test]
+fn scrolling_moves_one_patch_line_even_when_the_top_line_wraps() {
+    // Arrange: a wrapped added line, then one short added line
+    let long = format!("+{}", "w".repeat(TEXT_COLUMNS * WRAP_ROWS));
+    let file = patch_file(&format!("@@ -1,1 +1,2 @@\n{long}\n+tail"));
+
+    // Act: skip the hunk line, then the wrapped line
+    let one = draw_scrolled(&file, 1);
+    let two = draw_scrolled(&file, 2);
+
+    // Assert
+    assert!(body_rows(&one)[0].contains('w'), "{one}");
+    assert!(!two.contains('w'), "{two}");
+    assert!(body_rows(&two)[0].contains("tail"), "{two}");
+}
+
+#[test]
+fn a_wrapped_tab_line_still_draws_the_tab_as_four_spaces() {
+    // Arrange: a tab, then filler that forces a wrap
+    let file = patch_file(&format!("@@ -1,1 +1,1 @@\n+\t{}", "t".repeat(TEXT_COLUMNS)));
+
+    // Act
+    let screen = screen_text(&draw(&file, false, SCREEN_HEIGHT));
+
+    // Assert: the first row ends right after the spaces and filler, so the tab took four cells
+    let rows = body_rows(&screen);
+    assert_eq!(rows.len(), 3, "{screen}");
+    let first = rows[1].trim_start();
+    assert!(first.contains("+    t"), "{screen}");
+    assert_eq!(rows[1].chars().count(), SCREEN_WIDTH as usize, "{screen}");
+}
+
+#[test]
+fn wide_glyphs_are_never_split_across_rows() {
+    // Arrange: two-cell glyphs; the marker leaves one odd cell on each full row
+    let glyphs = 100;
+    let file = patch_file(&format!("@@ -1,1 +1,1 @@\n+{}", "日".repeat(glyphs)));
+
+    // Act
+    let screen = screen_text(&draw(&file, false, SCREEN_HEIGHT));
+
+    // Assert: every glyph is whole, and no row holds more than fit
+    assert_eq!(screen.matches('日').count(), glyphs, "{screen}");
+    let per_row = (TEXT_COLUMNS - 1) / 2;
+    let rows = body_rows(&screen);
+    assert_eq!(rows[1].matches('日').count(), per_row, "{screen}");
+    assert!(rows
+        .iter()
+        .all(|row| row.matches('日').count() <= per_row + 1));
 }

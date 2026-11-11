@@ -98,13 +98,13 @@ impl PrSummary {
 pub enum DiffGap {
     /// GitHub left the patch out because the diff is too large.
     Truncated,
-    /// The file is binary, so it has no text diff.
-    Binary,
     /// The file was renamed with no content change.
     RenamedOnly,
-    /// No patch and no changes: an empty or binary file that was added or removed, or a mode-only
-    /// change. The REST entry cannot tell these apart.
-    Empty,
+    /// An added or removed file with no patch and no changes: empty or binary. The REST entry has
+    /// no binary flag, so it cannot tell these apart.
+    AddedOrRemovedNoText,
+    /// Any other status with no patch and no changes: a binary edit or a mode-only change.
+    ChangedNoText,
 }
 
 /// The diff of one changed file, or why there is none.

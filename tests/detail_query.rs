@@ -65,7 +65,7 @@ fn a_modified_file_keeps_its_patch_text() {
 }
 
 #[test]
-fn a_binary_file_is_flagged_binary_and_unavailable() {
+fn a_modified_file_with_no_patch_and_no_changes_is_binary_or_mode_only() {
     // Arrange
     let mapped = files();
 
@@ -75,7 +75,7 @@ fn a_binary_file_is_flagged_binary_and_unavailable() {
     // Assert
     match &file.diff {
         FileDiff::Unavailable { gap, web_url } => {
-            assert_eq!(*gap, DiffGap::Binary);
+            assert_eq!(*gap, DiffGap::ChangedNoText);
             assert_eq!(
                 web_url.as_str(),
                 "https://github.com/octo/widgets/blob/abc123/assets/logo.png"
@@ -119,10 +119,10 @@ fn path_previous_path_and_patch_are_sanitized() {
     }
 }
 
-// A file with no patch and no changes is Binary only when modified; a rename is RenamedOnly and
-// an added one is Empty, because the REST entry cannot tell an empty new file from a binary one.
+// A file with no patch and no changes is told apart by status only: the REST entry has no binary
+// flag, so the gap states what the status proves.
 #[test]
-fn pure_rename_without_patch_is_not_flagged_binary() {
+fn pure_rename_without_patch_is_renamed_only() {
     // Arrange
     let mapped = files();
 
@@ -147,7 +147,7 @@ fn pure_rename_without_patch_is_not_flagged_binary() {
 }
 
 #[test]
-fn empty_added_file_is_not_flagged_binary() {
+fn added_file_with_no_patch_is_empty_or_binary() {
     // Arrange
     let mapped = files();
 
@@ -156,7 +156,7 @@ fn empty_added_file_is_not_flagged_binary() {
 
     // Assert
     match &file.diff {
-        FileDiff::Unavailable { gap, .. } => assert_eq!(*gap, DiffGap::Empty),
+        FileDiff::Unavailable { gap, .. } => assert_eq!(*gap, DiffGap::AddedOrRemovedNoText),
         other => panic!("expected an unavailable diff, got {other:?}"),
     }
 }
@@ -525,5 +525,43 @@ fn a_files_body_that_is_not_an_array_is_a_typed_error() {
             matches!(result, Err(helios::github::queries::FilesError::Parse)),
             "{body:?}"
         );
+    }
+}
+
+#[test]
+fn no_patch_gap_follows_status_and_changes() {
+    // Arrange: each status and changes pair, with no patch
+    let cases = [
+        ("added", 0, DiffGap::AddedOrRemovedNoText),
+        ("removed", 0, DiffGap::AddedOrRemovedNoText),
+        ("modified", 0, DiffGap::ChangedNoText),
+        ("changed", 0, DiffGap::ChangedNoText),
+        ("copied", 0, DiffGap::ChangedNoText),
+        ("renamed", 0, DiffGap::RenamedOnly),
+        ("added", 7, DiffGap::Truncated),
+        ("removed", 7, DiffGap::Truncated),
+        ("modified", 7, DiffGap::Truncated),
+        ("renamed", 7, DiffGap::Truncated),
+    ];
+
+    for (status, changes, expected) in cases {
+        let json = serde_json::json!([{
+            "filename": "f",
+            "status": status,
+            "changes": changes,
+            "blob_url": "https://github.com/o/r/blob/a/f"
+        }])
+        .to_string();
+
+        // Act
+        let mapped = map_files(&json).expect("map the files");
+
+        // Assert
+        match &mapped[0].diff {
+            FileDiff::Unavailable { gap, .. } => {
+                assert_eq!(*gap, expected, "{status} with {changes} changes");
+            }
+            other => panic!("expected an unavailable diff, got {other:?}"),
+        }
     }
 }
