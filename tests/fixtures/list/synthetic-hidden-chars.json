@@ -1,0 +1,42 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 1,
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      },
+      "nodes": [
+        {
+          "number": 77,
+          "title": "Vis\u001b[31mible\u001b]0;pwned\u0007 ti‮tle\u009b2J\u007f ",
+          "isDraft": false,
+          "updatedAt": "2026-11-05T10:00:00Z",
+          "author": {
+            "login": "ev\u001b[2Jil⁦us⁩er"
+          },
+          "repository": {
+            "nameWithOwner": "octo/wid\u001b[31mge\u001b]0;pwned\u0007ts‮"
+          },
+          "reviewDecision": "UN\u001b[0mKN‎OWN",
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "state": "FA‮IL\u001b[2JED"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "rateLimit": {
+      "remaining": 4000,
+      "resetAt": "2026-11-05T12:00:00Z",
+      "cost": 1
+    }
+  }
+}
