@@ -82,6 +82,7 @@ pub enum ListFilter {
 
 /// The lists each account loads: Mine and Needs me.
 const LISTS_PER_ACCOUNT: usize = 2;
+const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
 
 /// The host and login of one account.
 pub type AccountKey = (String, String);
@@ -117,6 +118,7 @@ pub struct App {
     account_count: usize,
     answered: usize,
     notice: Option<String>,
+    spinner_frame: usize,
     requests: Vec<LoadRequest>,
     generation: u64,
     cursor: usize,
@@ -373,6 +375,20 @@ impl App {
     /// each of the two lists.
     pub fn is_loading(&self) -> bool {
         self.answered < self.account_count * LISTS_PER_ACCOUNT
+    }
+
+    /// Moves the spinner on one frame while a load is running.
+    pub fn tick(&mut self) {
+        if self.is_loading() {
+            self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
+        }
+    }
+
+    /// The spinner frame to draw, or `None` when nothing is loading.
+    pub fn spinner(&self) -> Option<char> {
+        self.is_loading()
+            .then(|| SPINNER_FRAMES.get(self.spinner_frame).copied())
+            .flatten()
     }
 
     /// A fixed note for the screen, such as why no account could be read.

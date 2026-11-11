@@ -92,7 +92,13 @@ fn choice_line<T: PartialEq + Copy>(names: &[(T, &'static str)], current: T) -> 
 
 fn header_line(app: &App) -> Line<'static> {
     match app.screen {
-        Screen::List => choice_line(&VIEWS, app.view),
+        Screen::List => {
+            let mut line = choice_line(&VIEWS, app.view);
+            if let Some(frame) = app.spinner() {
+                line.push_span(Span::raw(format!("{HEADER_SEPARATOR}{frame}")));
+            }
+            line
+        }
         Screen::Detail => choice_line(&TABS, app.tab),
         Screen::Diff => Line::from(DIFF_HEADER),
     }

@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -37,6 +37,7 @@ pub const REPO: &str = "org/repo";
 pub const SCREEN_WIDTH: u16 = 120;
 pub const SCREEN_HEIGHT: u16 = 24;
 const SETTLE_LIMIT: Duration = Duration::from_secs(10);
+const HOLD_POLL: Duration = Duration::from_millis(1);
 const SETTLE_POLL: Duration = Duration::from_millis(1);
 
 pub fn when() -> DateTime<Utc> {
@@ -75,6 +76,8 @@ pub struct FakeApi {
     pub failure: Option<fn() -> GithubError>,
     /// Makes every detail and files call fail.
     pub detail_failure: Option<fn() -> GithubError>,
+    /// Makes every list call wait until the flag is set.
+    pub hold: Option<Arc<AtomicBool>>,
 }
 
 impl FakeApi {
@@ -88,6 +91,7 @@ impl FakeApi {
             list_calls: Arc::new(AtomicUsize::new(0)),
             failure: None,
             detail_failure: None,
+            hold: None,
         }
     }
 
@@ -99,6 +103,11 @@ impl FakeApi {
 impl GithubApi for FakeApi {
     async fn list(&self, kind: ListKind) -> Result<Listing, GithubError> {
         self.list_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(hold) = &self.hold {
+            while !hold.load(Ordering::SeqCst) {
+                tokio::time::sleep(HOLD_POLL).await;
+            }
+        }
         Self::fail(self.failure)?;
         let login = self.login.as_str();
         let rows = match kind {

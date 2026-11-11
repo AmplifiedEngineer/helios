@@ -3,7 +3,7 @@
 #[allow(dead_code)]
 mod support;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -386,4 +386,27 @@ fn the_configured_refresh_interval_sets_when_the_list_refreshes() {
     // Assert
     assert_eq!(before_due, FIRST_LOAD_CALLS);
     assert!(harness.list_calls.load(Ordering::SeqCst) > FIRST_LOAD_CALLS);
+}
+
+#[test]
+fn the_spinner_moves_between_two_loop_ticks_while_loading_and_stops_when_loaded() {
+    // Arrange: the first load waits until the test lets it go
+    let release = Arc::new(AtomicBool::new(false));
+    let mut api = FakeApi::new();
+    api.hold = Some(Arc::clone(&release));
+    let mut harness = Harness::start_unsettled(vec![api]);
+
+    // Act
+    harness.step();
+    let first = harness.session.app().spinner();
+    harness.step();
+    let second = harness.session.app().spinner();
+    release.store(true, Ordering::SeqCst);
+    harness.settle();
+
+    // Assert
+    assert!(first.is_some(), "no spinner while loading");
+    assert_ne!(first, second, "the spinner did not move");
+    assert_eq!(harness.session.app().spinner(), None);
+    assert_hides(&harness.screen(), &["Loading"]);
 }

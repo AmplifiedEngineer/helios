@@ -143,6 +143,10 @@ where
     /// when anything changed. It waits at most `timeout` for the event.
     pub fn step(&mut self, timeout: Duration) -> io::Result<Flow> {
         self.drain_results();
+        if self.app.is_loading() {
+            self.app.tick();
+            self.dirty = true;
+        }
         if self.scheduler.tick(scheduler_screen(self.app.screen)) {
             self.start_refresh();
         }
