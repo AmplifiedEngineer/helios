@@ -405,3 +405,103 @@ fn a_partial_detail_says_so_on_the_list_tabs() {
     app.tab = DetailTab::Overview;
     assert!(!render_detail(&app).contains(PARTIAL_NOTE));
 }
+
+/// A pull request with `count` invented commits, open on the Commits tab.
+fn app_with_commits(count: usize) -> App {
+    let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
+    let mut detail = map_detail(&json).expect("map the detail fixture");
+    detail.commits = (0..count)
+        .map(|index| helios::model::CommitSummary {
+            oid: helios::sanitize::sanitize(&format!("{index:07}abcdef")),
+            headline: helios::sanitize::sanitize(&format!("commit number {index}")),
+            author: helios::sanitize::sanitize("octocat"),
+            date: Utc
+                .with_ymd_and_hms(2026, 11, 7, 18, 0, 0)
+                .single()
+                .expect("a valid instant"),
+        })
+        .collect();
+    let mut app = App::new();
+    app.select(key());
+    app.apply_detail(&key(), Ok(detail));
+    app.tab = DetailTab::Commits;
+    app.screen = Screen::Detail;
+    app
+}
+
+#[test]
+fn commits_past_the_screen_are_reachable_by_scrolling() {
+    // Arrange: more commits than rows, so the tail is below the fold
+    let mut app = app_with_commits(150);
+    let first = render_detail(&app);
+    assert!(first.contains("commit number 0 "), "{first}");
+    assert!(!first.contains("commit number 149 "), "{first}");
+
+    // Act: jump to the end, as a reviewer would with G
+    press(&mut app, KeyCode::Char('G'), KeyModifiers::NONE);
+    let last = render_detail(&app);
+
+    // Assert: the last commit shows and the first has scrolled away
+    assert!(
+        last.contains("commit number 149 "),
+        "tail unreachable:\n{last}"
+    );
+    assert!(!last.contains("commit number 0 "), "{last}");
+
+    // Act: one line back up, then back to the top
+    press(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
+    assert!(render_detail(&app).contains("commit number 148 "));
+    press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE);
+    assert!(render_detail(&app).contains("commit number 0 "));
+}
+
+#[test]
+fn leaving_a_tab_resets_its_scroll() {
+    // Arrange: scrolled to the end of a long commit list
+    let mut app = app_with_commits(150);
+    press(&mut app, KeyCode::Char('G'), KeyModifiers::NONE);
+
+    // Act: move to the next tab and back
+    press(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    press(&mut app, KeyCode::BackTab, KeyModifiers::NONE);
+
+    // Assert: the commits start at the top again
+    assert!(render_detail(&app).contains("commit number 0 "));
+}
+
+#[test]
+fn a_selected_file_with_a_long_wrapped_path_stays_on_screen() {
+    // Arrange: ten files whose paths each wrap onto two rows of a 40 by 10 area
+    let nodes: Vec<serde_json::Value> = (0..10)
+        .map(|index| {
+            serde_json::json!({
+                "filename": format!("dir/{index}/{}", "x".repeat(50)),
+                "previous_filename": null,
+                "status": "modified",
+                "changes": 1,
+                "blob_url": "https://github.com/o/r/blob/a/f",
+                "patch": "@@ -1 +1 @@\n-a\n+b"
+            })
+        })
+        .collect();
+    let files = map_files(&serde_json::Value::Array(nodes).to_string()).expect("map files");
+    let mut app = open_detail(DetailTab::Files);
+    app.apply_files(&key(), files);
+    app.screen = Screen::Detail;
+    for _ in 0..9 {
+        press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
+    }
+
+    // Act
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("test terminal");
+    terminal
+        .draw(|frame| detail::render(frame, frame.area(), &app, &FixedClock))
+        .expect("draw");
+    let screen = buffer_text(terminal.backend().buffer());
+
+    // Assert: the last file, selected, is on screen
+    assert!(
+        screen.contains("dir/9/"),
+        "selected file off screen:\n{screen}"
+    );
+}

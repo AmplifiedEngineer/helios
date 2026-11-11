@@ -38,7 +38,7 @@ The footer shows the keys that work on the screen you are on. `?` opens the same
 
 | Key | Action |
 |-----|--------|
-| `j/k` | move, or scroll a diff. The arrow keys work too. |
+| `j/k` | move, or scroll a diff or a long tab. The arrow keys work too. |
 | `g/G` | first or last |
 | `Enter` | open the pull request, or the file diff on the Files tab |
 | `Esc` | back. `Backspace` works too. |

@@ -1,7 +1,7 @@
-[Mine]  Needs me
-HOST       REPO       #      TITLE            AUTHOR       TAG      DRAFT REVIEW   CHECKS   UPDATED
-github.com org/repo   #1     First change     octo                                          2h
-github.com org/repo   #2     Second change    octo                                          2h
+[Mine]  Needs me  |
+REPO                     #      TITLE                                   REVIEW     CHECKS   UPDATED
+org/repo                 #1     First change                                                2h
+org/repo                 #2     Second change                                               2h
 
 
 

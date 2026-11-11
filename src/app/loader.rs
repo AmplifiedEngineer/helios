@@ -53,6 +53,11 @@ impl<A: GithubApi + 'static> Loader<A> {
         (loader, receiver)
     }
 
+    /// A sender into the same channel the results arrive on.
+    pub fn sender(&self) -> Sender<Message> {
+        self.sender.clone()
+    }
+
     pub fn source_count(&self) -> usize {
         self.sources.len()
     }

@@ -247,3 +247,18 @@ fn a_second_hunk_restarts_the_gutters_after_a_no_newline_line() {
     let tail = line_with(&screen, "tail");
     assert!(tail.contains(" 40   50 "), "{tail:?}");
 }
+
+#[test]
+fn tab_indented_code_keeps_its_indent_on_screen() {
+    // Arrange: a patch whose added line is indented with one tab, as Go and Makefile code is
+    let file = patch_file("@@ -1,1 +1,2 @@\n ctxbefore\n+\tindented");
+
+    // Act
+    let text = screen_text(&draw(&file, false, SCREEN_HEIGHT));
+
+    // Assert: the tab turns into spaces, so the text does not touch the marker
+    assert!(
+        text.contains("+    indented"),
+        "tab indent lost on screen:\n{text}"
+    );
+}

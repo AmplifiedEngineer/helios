@@ -61,12 +61,18 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         key: "j/k",
         action: "scroll",
-        scopes: &[Scope::Diff],
+        scopes: &[Scope::Diff, Scope::Detail],
     },
     Binding {
         key: "g/G",
         action: "first/last",
-        scopes: &[Scope::Mine, Scope::NeedsMe, Scope::Files, Scope::Diff],
+        scopes: &[
+            Scope::Mine,
+            Scope::NeedsMe,
+            Scope::Detail,
+            Scope::Files,
+            Scope::Diff,
+        ],
     },
     Binding {
         key: "Enter",
@@ -208,7 +214,11 @@ fn detail_key(app: &mut App, code: KeyCode) -> Outcome {
                 app.move_file(step);
             }
         }
-        _ => {}
+        code => {
+            if let Some(step) = step_for(code) {
+                app.scroll_detail(step);
+            }
+        }
     }
     Outcome::Continue
 }

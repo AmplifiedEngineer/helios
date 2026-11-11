@@ -10,6 +10,7 @@ use helios::app::{App, ListFilter};
 use helios::github::errors::GithubError;
 use helios::github::queries::{map_page, merge_needs_me};
 use helios::model::PrSummary;
+use helios::sanitize::sanitize;
 use helios::tui::{mine, needs_me};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -66,8 +67,12 @@ fn needs_me_app() -> App {
 }
 
 fn render_needs_me(app: &App) -> String {
+    render_needs_me_at(app, SCREEN_WIDTH)
+}
+
+fn render_needs_me_at(app: &App, width: u16) -> String {
     let mut terminal =
-        Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+        Terminal::new(TestBackend::new(width, SCREEN_HEIGHT)).expect("test terminal");
     terminal
         .draw(|frame| needs_me::render(frame, frame.area(), app, &FixedClock))
         .expect("draw");
@@ -207,6 +212,11 @@ fn escape_fixture_renders_clean_in_every_list_column() {
         "a source text carries no hidden characters, so the test proves nothing: {sources:?}"
     );
     let hidden_host_row = rows.first().expect("one fixture row");
+    let mut other_host_row = hidden_host_row.clone();
+    other_host_row.key.host = OTHER_HOST.into();
+    other_host_row.key.number += 1;
+    let rows = [rows.clone(), vec![other_host_row]].concat();
+    let hidden_host_row = rows.first().expect("one fixture row");
     assert_eq!(
         hidden_host_row.key.host, hidden_host,
         "the host no longer reaches the renderer raw"
@@ -222,7 +232,7 @@ fn escape_fixture_renders_clean_in_every_list_column() {
     });
 
     // Act
-    let screen = render_needs_me(&app);
+    let screen = render_needs_me_at(&app, WIDE_WIDTH);
 
     // Assert
     let leaked: Vec<char> = screen
@@ -338,4 +348,125 @@ fn a_whole_list_shows_no_partial_note() {
 
     // Assert
     assert_hides(&screen, &["Some rows are not shown"]);
+}
+
+const LONG_REPO: &str = "amplifiedengineer/helios";
+const TRIMMED_REPO: &str = "an-organisation-with-a-long-name/helios-tui";
+const LONG_TITLE: &str = "Make the list columns give the spare width to the title column";
+const NARROW_WIDTH: u16 = 80;
+const MEDIUM_WIDTH: u16 = 110;
+const WIDE_WIDTH: u16 = 160;
+const OTHER_HOST: &str = "ghe.example.com";
+
+fn wide_row(host: &str, repo: &str, number: u64) -> PrSummary {
+    let mut row = fixture_rows(REVIEW_FIXTURE).remove(0);
+    row.key.host = host.into();
+    row.key.repo = repo.into();
+    row.key.number = number;
+    row.title = sanitize(LONG_TITLE);
+    row
+}
+
+fn app_with(rows: Vec<PrSummary>) -> App {
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    let host = rows
+        .first()
+        .map(|row| row.key.host.clone())
+        .unwrap_or_default();
+    app.apply(Loaded {
+        generation,
+        partial: false,
+        host,
+        account: ACCOUNT.into(),
+        result: Ok(rows),
+    });
+    app
+}
+
+fn header_line(screen: &str) -> &str {
+    screen.lines().next().expect("a header line")
+}
+
+#[test]
+fn the_title_takes_the_spare_width_and_the_repo_stays_whole() {
+    // Arrange
+    let app = app_with(vec![wide_row(HOST, LONG_REPO, 7)]);
+    let cases = [
+        (NARROW_WIDTH, "list_width_80", true),
+        (MEDIUM_WIDTH, "list_width_110", true),
+        (WIDE_WIDTH, "list_width_160", true),
+    ];
+
+    for (width, snapshot, repo_whole) in cases {
+        // Act
+        let screen = render_needs_me_at(&app, width);
+
+        // Assert
+        assert_eq!(
+            repo_whole,
+            screen.contains(LONG_REPO),
+            "at {width}:\n{screen}"
+        );
+        assert!(
+            screen.contains(LONG_TITLE) || width < WIDE_WIDTH,
+            "the title was cut at {width}:\n{screen}"
+        );
+        assert_snapshot(snapshot, &screen);
+    }
+}
+
+#[test]
+fn a_narrow_list_drops_the_low_value_columns_first() {
+    // Arrange
+    let app = app_with(vec![wide_row(HOST, LONG_REPO, 7)]);
+
+    // Act
+    let narrow = render_needs_me_at(&app, NARROW_WIDTH);
+    let medium = render_needs_me_at(&app, MEDIUM_WIDTH);
+    let wide = render_needs_me_at(&app, WIDE_WIDTH);
+
+    // Assert
+    for column in ["HOST", "DRAFT", "TAG"] {
+        assert_hides(header_line(&medium), &[column]);
+    }
+    assert_shows(
+        header_line(&medium),
+        &["REPO", "TITLE", "REVIEW", "CHECKS", "UPDATED"],
+    );
+    assert_shows(header_line(&narrow), &["REPO", "TITLE", "UPDATED"]);
+    assert_hides(header_line(&narrow), &["AUTHOR", "CHECKS"]);
+    assert_shows(header_line(&wide), &["AUTHOR", "REVIEW", "CHECKS"]);
+}
+
+#[test]
+fn the_host_column_shows_only_when_there_is_more_than_one_host() {
+    // Arrange
+    let one_host = app_with(vec![wide_row(HOST, LONG_REPO, 7)]);
+    let two_hosts = app_with(vec![
+        wide_row(HOST, LONG_REPO, 7),
+        wide_row(OTHER_HOST, LONG_REPO, 8),
+    ]);
+
+    // Act
+    let single = render_needs_me_at(&one_host, WIDE_WIDTH);
+    let double = render_needs_me_at(&two_hosts, WIDE_WIDTH);
+
+    // Assert
+    assert_hides(header_line(&single), &["HOST"]);
+    assert_shows(header_line(&double), &["HOST"]);
+    assert_shows(&double, &[HOST, OTHER_HOST]);
+}
+
+#[test]
+fn a_repo_that_is_too_long_loses_its_start_and_keeps_the_name() {
+    // Arrange
+    let app = app_with(vec![wide_row(HOST, TRIMMED_REPO, 7)]);
+
+    // Act
+    let screen = render_needs_me_at(&app, MEDIUM_WIDTH);
+
+    // Assert
+    assert_shows(&screen, &["\u{2026}", "/helios-tui"]);
+    assert_hides(&screen, &["an-organisation"]);
 }

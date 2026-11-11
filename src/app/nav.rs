@@ -98,15 +98,34 @@ impl App {
             Screen::Detail | Screen::List => Screen::List,
         };
         self.show_help = false;
+        self.detail_scroll = 0;
+    }
+
+    /// The first row of the open tab that is drawn; the Files tab scrolls with its cursor.
+    pub fn detail_scroll(&self) -> usize {
+        self.detail_scroll.min(self.detail_scroll_max.get())
+    }
+
+    /// Tells the app how far the open tab can scroll; the detail view calls it on every draw.
+    pub fn set_detail_scroll_max(&self, max: usize) {
+        self.detail_scroll_max.set(max);
+    }
+
+    /// Scrolls the open tab, which is not the Files tab.
+    pub fn scroll_detail(&mut self, step: Step) {
+        let max = self.detail_scroll_max.get();
+        self.detail_scroll = step.land(self.detail_scroll(), max.saturating_add(1));
     }
 
     pub fn next_tab(&mut self) {
         self.tab = self.tab.next();
+        self.detail_scroll = 0;
         self.ask_for_files();
     }
 
     pub fn previous_tab(&mut self) {
         self.tab = self.tab.previous();
+        self.detail_scroll = 0;
         self.ask_for_files();
     }
 

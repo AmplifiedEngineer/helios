@@ -3,7 +3,7 @@
 //! The event loop: keys in, background results in, one frame out.
 
 use std::io;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -50,16 +50,24 @@ pub enum Flow {
     Quit,
 }
 
-/// What the loop calls with the address of a pull request to show it in a browser.
-pub type Opener = Box<dyn FnMut(&str)>;
+/// What the loop calls with the address of a pull request to show it in a browser, and the
+/// channel to report a failure on.
+pub type Opener = Box<dyn FnMut(&str, &Sender<Message>)>;
 
-/// Opens the address with the system opener on its own thread, so the loop never waits for it.
+/// The fixed text shown when the browser did not open.
+const OPEN_FAILED_ALERT: &str = "Could not open the browser";
+
+/// Opens the address with the system opener on its own thread, so the loop never waits for
+/// it, and sends a failure back as a message.
 fn system_opener() -> Opener {
-    Box::new(|url| {
+    Box::new(|url, results| {
         let url = url.to_owned();
+        let results = results.clone();
         thread::spawn(move || {
-            // The browser either opens or it does not; the screen has no place to report it.
-            let _ = browser::open(&url);
+            if browser::open(&url).is_err() {
+                // The loop has quit when this fails, and nobody is left to tell.
+                let _ = results.send(Message::OpenFailed);
+            }
         });
     })
 }
@@ -73,6 +81,7 @@ pub struct Session<B: Backend, E, C: Clock, A> {
     scheduler: Scheduler<C>,
     loader: Loader<A>,
     results: Receiver<Message>,
+    sender: Sender<Message>,
     opener: Opener,
     dirty: bool,
 }
@@ -95,6 +104,7 @@ where
     ) -> Self {
         app.set_account_count(loader.source_count());
         let scheduler = Scheduler::new(clock.clone());
+        let sender = loader.sender();
         let mut session = Self {
             terminal,
             app,
@@ -103,6 +113,7 @@ where
             scheduler,
             loader,
             results,
+            sender,
             opener: system_opener(),
             dirty: true,
         };
@@ -143,6 +154,10 @@ where
     /// when anything changed. It waits at most `timeout` for the event.
     pub fn step(&mut self, timeout: Duration) -> io::Result<Flow> {
         self.drain_results();
+        if self.app.is_loading() {
+            self.app.tick();
+            self.dirty = true;
+        }
         if self.scheduler.tick(scheduler_screen(self.app.screen)) {
             self.start_refresh();
         }
@@ -166,13 +181,14 @@ where
         if key.kind != KeyEventKind::Press {
             return Flow::Running;
         }
+        self.app.clear_alert();
         match handle_key(&mut self.app, key) {
             Outcome::Continue => Flow::Running,
             Outcome::Quit => Flow::Quit,
             Outcome::OpenInBrowser => {
                 let url = self.app.current_pr().and_then(browser::pr_url);
                 if let Some(url) = url {
-                    (self.opener)(&url);
+                    (self.opener)(&url, &self.sender);
                 }
                 Flow::Running
             }
@@ -212,6 +228,7 @@ where
                     self.note_failure(result.as_ref().as_ref().err());
                     self.app.apply_detail(&key, *result);
                 }
+                Message::OpenFailed => self.app.set_alert(OPEN_FAILED_ALERT),
                 Message::Files(key, result) => {
                     self.note_failure(result.as_ref().err());
                     match result {

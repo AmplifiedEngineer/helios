@@ -3,12 +3,13 @@
 #[allow(dead_code)]
 mod support;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use helios::app::refresh::REFRESH_INTERVAL;
+use helios::app::worker::Message;
 use helios::app::Screen;
 use helios::github::errors::GithubError;
 use helios::tui::run::Flow;
@@ -331,7 +332,7 @@ fn two_accounts_both_show_their_rows() {
 fn record_opened_urls(harness: &mut Harness) -> Arc<Mutex<Vec<String>>> {
     let opened = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&opened);
-    harness.session.set_opener(Box::new(move |url| {
+    harness.session.set_opener(Box::new(move |url, _results| {
         sink.lock().expect("sink lock").push(url.to_owned())
     }));
     opened
@@ -386,4 +387,68 @@ fn the_configured_refresh_interval_sets_when_the_list_refreshes() {
     // Assert
     assert_eq!(before_due, FIRST_LOAD_CALLS);
     assert!(harness.list_calls.load(Ordering::SeqCst) > FIRST_LOAD_CALLS);
+}
+
+#[test]
+fn the_spinner_moves_between_two_loop_ticks_while_loading_and_stops_when_loaded() {
+    // Arrange: the first load waits until the test lets it go
+    let release = Arc::new(AtomicBool::new(false));
+    let mut api = FakeApi::new();
+    api.hold = Some(Arc::clone(&release));
+    let mut harness = Harness::start_unsettled(vec![api]);
+
+    // Act
+    harness.step();
+    let first = harness.session.app().spinner();
+    harness.step();
+    let second = harness.session.app().spinner();
+    release.store(true, Ordering::SeqCst);
+    harness.settle();
+
+    // Assert
+    assert!(first.is_some(), "no spinner while loading");
+    assert_ne!(first, second, "the spinner did not move");
+    assert_eq!(harness.session.app().spinner(), None);
+    assert_hides(&harness.screen(), &["Loading"]);
+}
+
+const OPEN_FAILED_TEXT: &str = "Could not open the browser";
+
+fn fail_to_open(harness: &mut Harness) {
+    harness.session.set_opener(Box::new(|_url, results| {
+        results
+            .send(Message::OpenFailed)
+            .expect("the loop still listens");
+    }));
+}
+
+#[test]
+fn a_failed_open_shows_a_notice_that_the_next_key_clears() {
+    // Arrange
+    let mut harness = Harness::start(FakeApi::new());
+    fail_to_open(&mut harness);
+
+    // Act
+    harness.type_char('o');
+    let after_open = harness.screen();
+    harness.type_char('j');
+    let after_key = harness.screen();
+
+    // Assert
+    assert_shows(&after_open, &[OPEN_FAILED_TEXT, "Mine one"]);
+    assert_hides(&after_key, &[OPEN_FAILED_TEXT]);
+}
+
+#[test]
+fn a_failed_open_shows_its_notice_on_the_detail_screen_too() {
+    // Arrange
+    let mut harness = Harness::start(FakeApi::new());
+    fail_to_open(&mut harness);
+    harness.press(KeyCode::Enter);
+
+    // Act
+    harness.type_char('o');
+
+    // Assert
+    assert_shows(&harness.screen(), &[OPEN_FAILED_TEXT]);
 }

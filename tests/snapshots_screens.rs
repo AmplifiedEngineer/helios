@@ -221,3 +221,54 @@ fn the_diff_screen_shows_the_selected_file_scrolled() {
     // Assert
     assert_snapshot("screen_diff", &screen);
 }
+
+fn header_of(screen: &str) -> &str {
+    screen.lines().next().expect("a header line")
+}
+
+#[test]
+fn the_loading_header_shows_a_spinner_that_moves_on_each_tick() {
+    // Arrange
+    let mut app = App::new();
+    app.set_account_count(1);
+    app.begin_refresh();
+    let first = render(&app);
+
+    // Act
+    app.tick();
+    let second = render(&app);
+
+    // Assert
+    assert_ne!(header_of(&first), header_of(&second), "{first}\n{second}");
+    assert!(header_of(&first).contains("[Mine]"), "{first}");
+}
+
+#[test]
+fn a_loaded_list_shows_no_spinner_and_a_tick_changes_nothing() {
+    // Arrange
+    let mut app = App::new();
+    app.set_account_count(1);
+    let generation = app.begin_refresh();
+    for apply in [App::apply_mine, App::apply] {
+        apply(
+            &mut app,
+            Loaded {
+                generation,
+                partial: false,
+                host: HOST.into(),
+                account: ACCOUNT.into(),
+                result: Ok(vec![row(1, "First change")]),
+            },
+        );
+    }
+    let before = render(&app);
+
+    // Act
+    app.tick();
+    let after = render(&app);
+
+    // Assert
+    assert!(!app.is_loading());
+    assert_eq!(before, after);
+    assert_eq!(header_of(&after).trim_end(), "[Mine]  Needs me");
+}

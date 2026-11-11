@@ -2,6 +2,7 @@
 
 //! The state the screens draw from and the workers feed.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::github::errors::GithubError;
@@ -82,6 +83,7 @@ pub enum ListFilter {
 
 /// The lists each account loads: Mine and Needs me.
 const LISTS_PER_ACCOUNT: usize = 2;
+const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
 
 /// The host and login of one account.
 pub type AccountKey = (String, String);
@@ -112,11 +114,16 @@ pub struct App {
     files_requested: bool,
     file_cursor: usize,
     diff_scroll: usize,
+    detail_scroll: usize,
+    /// The furthest the open tab can scroll; the detail view records it each draw.
+    detail_scroll_max: Cell<usize>,
     list_cursor: usize,
     mine_rows: Vec<PrSummary>,
     account_count: usize,
     answered: usize,
     notice: Option<String>,
+    alert: Option<&'static str>,
+    spinner_frame: usize,
     requests: Vec<LoadRequest>,
     generation: u64,
     cursor: usize,
@@ -299,6 +306,7 @@ impl App {
         self.files_requested = false;
         self.file_cursor = 0;
         self.diff_scroll = 0;
+        self.detail_scroll = 0;
     }
 
     /// Returns whether the result was applied.
@@ -375,9 +383,36 @@ impl App {
         self.answered < self.account_count * LISTS_PER_ACCOUNT
     }
 
+    /// Moves the spinner on one frame while a load is running.
+    pub fn tick(&mut self) {
+        if self.is_loading() {
+            self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
+        }
+    }
+
+    /// The spinner frame to draw, or `None` when nothing is loading.
+    pub fn spinner(&self) -> Option<char> {
+        self.is_loading()
+            .then(|| SPINNER_FRAMES.get(self.spinner_frame).copied())
+            .flatten()
+    }
+
     /// A fixed note for the screen, such as why no account could be read.
     pub fn set_notice(&mut self, notice: String) {
         self.notice = Some(notice);
+    }
+
+    /// A short fixed line for the header, cleared by the next key press.
+    pub fn set_alert(&mut self, alert: &'static str) {
+        self.alert = Some(alert);
+    }
+
+    pub fn alert(&self) -> Option<&'static str> {
+        self.alert
+    }
+
+    pub fn clear_alert(&mut self) {
+        self.alert = None;
     }
 
     pub fn notice(&self) -> Option<&str> {

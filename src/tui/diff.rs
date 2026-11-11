@@ -19,6 +19,8 @@ const NO_NEWLINE_MARKER: char = '\\';
 const ADD_COLOR: Color = Color::Green;
 const DELETE_COLOR: Color = Color::Red;
 const HUNK_COLOR: Color = Color::Cyan;
+/// A tab draws as this many spaces; a terminal cell grid has no tab stops inside a widget.
+const TAB_SPACES: &str = "    ";
 
 /// The most patch lines drawn for one file.
 pub const MAX_DIFF_LINES: usize = 500;
@@ -103,6 +105,8 @@ struct LineNumbers {
 
 impl LineNumbers {
     fn line(&mut self, text: &str, options: DiffOptions) -> Line<'static> {
+        let expanded = text.replace('\t', TAB_SPACES);
+        let text = expanded.as_str();
         if text.starts_with(HUNK_MARKER) {
             (self.old, self.new) = hunk_start(text);
             return Line::styled(text.to_owned(), paint(Some(HUNK_COLOR), options));

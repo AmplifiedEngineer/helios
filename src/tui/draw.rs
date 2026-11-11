@@ -59,7 +59,11 @@ pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
         Constraint::Length(footer_height),
     ])
     .areas(frame.area());
-    frame.render_widget(Paragraph::new(header_line(app)), header);
+    let mut header_text = header_line(app);
+    if let Some(alert) = app.alert() {
+        header_text.push_span(Span::raw(format!("{HEADER_SEPARATOR}{alert}")));
+    }
+    frame.render_widget(Paragraph::new(header_text), header);
     match app.screen {
         Screen::List => draw_list(frame, body, app, clock),
         Screen::Detail => detail::render(frame, body, app, clock),
@@ -92,7 +96,13 @@ fn choice_line<T: PartialEq + Copy>(names: &[(T, &'static str)], current: T) -> 
 
 fn header_line(app: &App) -> Line<'static> {
     match app.screen {
-        Screen::List => choice_line(&VIEWS, app.view),
+        Screen::List => {
+            let mut line = choice_line(&VIEWS, app.view);
+            if let Some(frame) = app.spinner() {
+                line.push_span(Span::raw(format!("{HEADER_SEPARATOR}{frame}")));
+            }
+            line
+        }
         Screen::Detail => choice_line(&TABS, app.tab),
         Screen::Diff => Line::from(DIFF_HEADER),
     }

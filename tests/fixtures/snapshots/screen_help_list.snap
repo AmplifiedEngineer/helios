@@ -1,7 +1,7 @@
-[Mine]  Needs me
-HOST       REPO       #      T┌Keys──────────────────────────────────┐AFT REVIEW   CHECKS   UPDATED
-github.com org/repo   #1     F│j/k move                              │                      2h
-github.com org/repo   #2     S│g/G first/last                        │                      2h
+[Mine]  Needs me  |
+REPO                     #    ┌Keys──────────────────────────────────┐  REVIEW     CHECKS   UPDATED
+org/repo                 #1   │j/k move                              │                      2h
+org/repo                 #2   │g/G first/last                        │                      2h
                               │Enter open                            │
                               │m mine/needs me                       │
                               │r refresh                             │
