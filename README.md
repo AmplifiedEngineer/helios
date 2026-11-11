@@ -34,15 +34,21 @@ A flag beats its environment variable. `HELIOS_GH` names the `gh` program to run
 
 ### Keys
 
-The key table is defined for the terminal UI. The UI does not act on most of these keys yet.
+The footer shows the keys that work on the screen you are on. `?` opens the same list.
 
 | Key | Action |
 |-----|--------|
+| `j/k` | move, or scroll a diff. The arrow keys work too. |
+| `g/G` | first or last |
+| `Enter` | open the pull request, or the file diff on the Files tab |
+| `Esc` | back. `Backspace` works too. |
+| `m` | switch between Mine and Needs me |
 | `r` | refresh |
-| `f` | filter |
+| `f` | filter Needs me: all, review or assigned |
 | `d` | toggle drafts |
 | `Tab` | next tab |
 | `Shift-Tab` | previous tab |
+| `?` | help |
 | `q` | quit |
 | `Ctrl-C` | quit |
 

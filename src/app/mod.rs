@@ -8,14 +8,37 @@ use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
 use worker::Loaded;
 
+mod nav;
 pub mod refresh;
 pub mod worker;
+
+pub use nav::Step;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Screen {
     #[default]
     List,
     Detail,
+    /// The diff of one file chosen on the Files tab.
+    Diff,
+}
+
+/// Which list the list screen shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListView {
+    #[default]
+    Mine,
+    NeedsMe,
+}
+
+impl ListView {
+    /// The other list.
+    pub fn other(self) -> Self {
+        match self {
+            Self::Mine => Self::NeedsMe,
+            Self::NeedsMe => Self::Mine,
+        }
+    }
 }
 
 /// The tabs of the detail screen.
@@ -43,6 +66,8 @@ pub enum DetailState {
 pub enum LoadRequest {
     /// The detail of one pull request.
     Detail(PrKey),
+    /// The changed files of one pull request.
+    Files(PrKey),
 }
 
 /// Which tagged rows the Needs me list shows.
@@ -53,6 +78,9 @@ pub enum ListFilter {
     Review,
     Assigned,
 }
+
+/// The lists each account loads: Mine and Needs me.
+const LISTS_PER_ACCOUNT: usize = 2;
 
 /// The host and login of one account.
 pub type AccountKey = (String, String);
@@ -74,8 +102,20 @@ pub struct App {
     pub filter: ListFilter,
     pub show_drafts: bool,
     pub tab: DetailTab,
+    /// Whether the help overlay is open.
+    pub show_help: bool,
+    pub view: ListView,
     detail: DetailState,
     files: Option<Vec<ChangedFile>>,
+    files_failure: Option<GithubError>,
+    files_requested: bool,
+    file_cursor: usize,
+    diff_scroll: usize,
+    list_cursor: usize,
+    mine_rows: Vec<PrSummary>,
+    account_count: usize,
+    answered: usize,
+    notice: Option<String>,
     requests: Vec<LoadRequest>,
     generation: u64,
     cursor: usize,
@@ -115,6 +155,7 @@ impl App {
     /// Starts a refresh and returns its generation.
     pub fn begin_refresh(&mut self) -> u64 {
         self.generation += 1;
+        self.answered = 0;
         self.generation
     }
 
@@ -179,13 +220,26 @@ impl App {
         self.files.as_deref()
     }
 
+    /// Records a failed files load for the open pull request, so the Files tab can say so.
+    pub fn apply_files_failure(&mut self, key: &PrKey, error: GithubError) {
+        if self.selected.as_ref() == Some(key) {
+            self.files_failure = Some(error);
+            self.files_requested = false;
+        }
+    }
+
+    /// Why the files of the open pull request did not load, if they did not.
+    pub fn files_failure(&self) -> Option<&GithubError> {
+        self.files_failure.as_ref()
+    }
+
     pub fn select(&mut self, key: PrKey) {
         if let Some(index) = self.index_of(&key) {
             self.cursor = index;
         }
         self.selected = Some(key);
         self.detail = DetailState::Loading;
-        self.files = None;
+        self.reset_files();
     }
 
     /// The key of the row the cursor is on.
@@ -229,7 +283,15 @@ impl App {
     fn clear_selection(&mut self) {
         self.selected = None;
         self.detail = DetailState::Loading;
+        self.reset_files();
+    }
+
+    fn reset_files(&mut self) {
         self.files = None;
+        self.files_failure = None;
+        self.files_requested = false;
+        self.file_cursor = 0;
+        self.diff_scroll = 0;
     }
 
     /// Returns whether the result was applied.
@@ -237,20 +299,70 @@ impl App {
         if loaded.generation < self.generation {
             return false;
         }
-        match loaded.result {
+        self.answered += 1;
+        self.keep_highlight(|app| match loaded.result {
             Ok(rows) => {
-                self.host_failures
-                    .remove(&(loaded.host.clone(), loaded.account.clone()));
-                self.rows
+                app.clear_failure(&loaded.host, &loaded.account);
+                app.rows
                     .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
-                self.rows.extend(rows);
-                self.restore_cursor();
+                app.rows.extend(rows);
+                if app.screen == Screen::List {
+                    app.restore_cursor();
+                }
             }
-            Err(error) => {
-                self.host_failures
-                    .insert((loaded.host, loaded.account), error);
-            }
-        }
+            Err(error) => app.record_failure(loaded.host, loaded.account, error),
+        });
         true
+    }
+
+    /// Like `apply`, for one account's rows of the Mine list. Returns whether it was applied.
+    pub fn apply_mine(&mut self, loaded: Loaded) -> bool {
+        if loaded.generation < self.generation {
+            return false;
+        }
+        self.answered += 1;
+        self.keep_highlight(|app| match loaded.result {
+            Ok(rows) => {
+                app.clear_failure(&loaded.host, &loaded.account);
+                app.mine_rows
+                    .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
+                app.mine_rows.extend(rows);
+            }
+            Err(error) => app.record_failure(loaded.host, loaded.account, error),
+        });
+        true
+    }
+
+    fn clear_failure(&mut self, host: &str, account: &str) {
+        self.host_failures
+            .remove(&(host.to_owned(), account.to_owned()));
+    }
+
+    fn record_failure(&mut self, host: String, account: String, error: GithubError) {
+        self.host_failures.insert((host, account), error);
+    }
+
+    /// Tells the app how many accounts it loads for, so it can tell loading from empty.
+    pub fn set_account_count(&mut self, count: usize) {
+        self.account_count = count;
+    }
+
+    pub fn account_count(&self) -> usize {
+        self.account_count
+    }
+
+    /// Whether the current refresh still waits for an answer: each account answers once for
+    /// each of the two lists.
+    pub fn is_loading(&self) -> bool {
+        self.answered < self.account_count * LISTS_PER_ACCOUNT
+    }
+
+    /// A fixed note for the screen, such as why no account could be read.
+    pub fn set_notice(&mut self, notice: String) {
+        self.notice = Some(notice);
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
     }
 }
