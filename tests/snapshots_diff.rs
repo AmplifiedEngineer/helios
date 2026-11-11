@@ -210,3 +210,16 @@ fn a_binary_file_renders_one_fixed_line() {
     assert!(!screen.contains(TRUNCATED_LINE));
     assert_snapshot("diff_binary", &screen);
 }
+
+#[test]
+fn a_hunk_header_at_the_largest_line_number_does_not_overflow() {
+    // Arrange
+    let patch = "@@ -4294967295 +4294967295 @@\n context\n context";
+    let file = patch_file(patch);
+
+    // Act
+    let buffer = draw(&file, false, SCREEN_HEIGHT);
+
+    // Assert
+    assert!(format!("{buffer:?}").contains("4294967295"));
+}

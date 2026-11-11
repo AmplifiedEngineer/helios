@@ -2,6 +2,7 @@
 
 //! The GitHub client for one account.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -73,6 +74,10 @@ const SCHEME_RELATIVE_PREFIX: &str = "//";
 /// `get_pages` follows the links from the first page.
 const FIRST_FILES_PAGE: usize = 1;
 const GRAPHQL_PATH: &str = "/graphql";
+/// Path suffix GHES puts on its REST base; its GraphQL endpoint sits one level up.
+const GHES_REST_SUFFIX: &str = "/v3";
+/// Most pages `get_pages` reads: 3000 changed files at 100 per page.
+pub const MAX_PAGES: usize = 30;
 /// Shape of the pull request files path built by `queries::files_path`.
 const FILES_PATH_TEMPLATE: &str = "/repos/{owner}/{repo}/pulls/{number}/files";
 /// Text the timeout layer's error carries.
@@ -163,7 +168,7 @@ impl Octo {
         query: &str,
         variables: &serde_json::Value,
     ) -> Result<GraphqlResponse, GithubError> {
-        let client = self.client()?;
+        let client = self.graphql_client()?;
         let payload = serde_json::json!({ "query": query, "variables": variables });
         let response = client
             ._post(GRAPHQL_PATH, Some(&payload))
@@ -184,17 +189,22 @@ impl Octo {
     /// Reads every page of a REST list, following relative `Link` paths, and
     /// returns the items of all pages in order.
     ///
-    /// A next link that is not a path on the same base is rejected with
+    /// A next link may be a path or an absolute URL on the same base. Any other
+    /// target, a repeated page, or more than `MAX_PAGES` pages is rejected with
     /// `GithubError::Decode`, so the token never goes to another host and a
     /// truncated list is never passed off as complete.
     pub async fn get_pages(&self, path: &str) -> Result<Vec<serde_json::Value>, GithubError> {
         let mut items = Vec::new();
         let mut next = Some(path.to_string());
+        let mut seen = HashSet::new();
         while let Some(current) = next {
+            if seen.len() >= MAX_PAGES || !seen.insert(current.clone()) {
+                return Err(GithubError::Decode);
+            }
             let (page, link) = self.get_page(&current).await?;
             items.extend(page);
             next = match link {
-                Some(value) => next_path(&value)?,
+                Some(value) => next_path(&value, &self.base_uri)?,
                 None => None,
             };
         }
@@ -224,9 +234,22 @@ impl Octo {
     }
 
     fn client(&self) -> Result<Octocrab, GithubError> {
+        self.client_for(&self.base_uri)
+    }
+
+    /// The client for GraphQL, whose endpoint is `<host>/api/graphql` on GHES.
+    fn graphql_client(&self) -> Result<Octocrab, GithubError> {
+        let base = self
+            .base_uri
+            .strip_suffix(GHES_REST_SUFFIX)
+            .unwrap_or(&self.base_uri);
+        self.client_for(base)
+    }
+
+    fn client_for(&self, base: &str) -> Result<Octocrab, GithubError> {
         let token = self.token_source.fetch()?;
         Octocrab::builder()
-            .base_uri(self.base_uri.as_str())
+            .base_uri(base)
             .map_err(|_| GithubError::Network)?
             .personal_token(token.expose().to_string())
             .add_retry_config(RetryConfig::None)
@@ -306,22 +329,30 @@ fn check_status<V: AsRef<[u8]>>(
 /// The items of one page and the raw `Link` header, if any.
 type Page = (Vec<serde_json::Value>, Option<String>);
 
-/// The `rel="next"` target of a `Link` header, when it is a path on the same
-/// base. Returns `Ok(None)` on the last page.
-fn next_path(link: &str) -> Result<Option<String>, GithubError> {
+/// The `rel="next"` target of a `Link` header as a path on `base_uri`. An
+/// absolute URL is accepted only when it starts with `base_uri` and continues
+/// with a path or query. Returns `Ok(None)` on the last page.
+fn next_path(link: &str, base_uri: &str) -> Result<Option<String>, GithubError> {
     let target = link
         .split(',')
         .map(str::trim)
         .find(|entry| entry.contains(NEXT_RELATION))
         .and_then(|entry| entry.strip_prefix('<')?.split_once('>'))
         .map(|(target, _)| target);
-    match target {
-        None => Ok(None),
-        Some(path) if path.starts_with('/') && !path.starts_with(SCHEME_RELATIVE_PREFIX) => {
-            Ok(Some(path.to_string()))
+    let Some(target) = target else {
+        return Ok(None);
+    };
+    let base = base_uri.trim_end_matches('/');
+    if let Some(rest) = target.strip_prefix(base) {
+        if rest.starts_with('/') || rest.starts_with('?') {
+            return Ok(Some(rest.to_string()));
         }
-        Some(_) => Err(GithubError::Decode),
+        return Err(GithubError::Decode);
     }
+    if target.starts_with('/') && !target.starts_with(SCHEME_RELATIVE_PREFIX) {
+        return Ok(Some(target.to_string()));
+    }
+    Err(GithubError::Decode)
 }
 
 /// Maps a failure below HTTP, telling a timeout apart from other network errors.
