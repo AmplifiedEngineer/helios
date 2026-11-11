@@ -12,6 +12,7 @@ name: Dependency Review
 on:
   pull_request:
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read
@@ -23,6 +24,9 @@ concurrency:
 jobs:
   review:
     name: review
+    # A merge group has no pull request to inspect. The skipped job still
+    # satisfies the required check.
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     # timeout-minutes: max(5, 3x slowest success seen); a hung job fails fast.
     timeout-minutes: 5
