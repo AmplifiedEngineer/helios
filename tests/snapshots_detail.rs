@@ -405,3 +405,63 @@ fn a_partial_detail_says_so_on_the_list_tabs() {
     app.tab = DetailTab::Overview;
     assert!(!render_detail(&app).contains(PARTIAL_NOTE));
 }
+
+/// A pull request with `count` invented commits, open on the Commits tab.
+fn app_with_commits(count: usize) -> App {
+    let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
+    let mut detail = map_detail(&json).expect("map the detail fixture");
+    detail.commits = (0..count)
+        .map(|index| helios::model::CommitSummary {
+            oid: helios::sanitize::sanitize(&format!("{index:07}abcdef")),
+            headline: helios::sanitize::sanitize(&format!("commit number {index}")),
+            author: helios::sanitize::sanitize("octocat"),
+            date: Utc
+                .with_ymd_and_hms(2026, 11, 7, 18, 0, 0)
+                .single()
+                .expect("a valid instant"),
+        })
+        .collect();
+    let mut app = App::new();
+    app.select(key());
+    app.apply_detail(&key(), Ok(detail));
+    app.tab = DetailTab::Commits;
+    app.screen = Screen::Detail;
+    app
+}
+
+#[test]
+fn commits_past_the_screen_are_reachable_by_scrolling() {
+    // Arrange: more commits than rows, so the tail is below the fold
+    let mut app = app_with_commits(150);
+    let first = render_detail(&app);
+    assert!(first.contains("commit number 0 "), "{first}");
+    assert!(!first.contains("commit number 149 "), "{first}");
+
+    // Act: jump to the end, as a reviewer would with G
+    press(&mut app, KeyCode::Char('G'), KeyModifiers::NONE);
+    let last = render_detail(&app);
+
+    // Assert: the last commit shows and the first has scrolled away
+    assert!(last.contains("commit number 149 "), "tail unreachable:\n{last}");
+    assert!(!last.contains("commit number 0 "), "{last}");
+
+    // Act: one line back up, then back to the top
+    press(&mut app, KeyCode::Char('k'), KeyModifiers::NONE);
+    assert!(render_detail(&app).contains("commit number 148 "));
+    press(&mut app, KeyCode::Char('g'), KeyModifiers::NONE);
+    assert!(render_detail(&app).contains("commit number 0 "));
+}
+
+#[test]
+fn leaving_a_tab_resets_its_scroll() {
+    // Arrange: scrolled to the end of a long commit list
+    let mut app = app_with_commits(150);
+    press(&mut app, KeyCode::Char('G'), KeyModifiers::NONE);
+
+    // Act: move to the next tab and back
+    press(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+    press(&mut app, KeyCode::BackTab, KeyModifiers::NONE);
+
+    // Assert: the commits start at the top again
+    assert!(render_detail(&app).contains("commit number 0 "));
+}

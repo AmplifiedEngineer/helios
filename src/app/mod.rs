@@ -2,6 +2,7 @@
 
 //! The state the screens draw from and the workers feed.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::github::errors::GithubError;
@@ -113,6 +114,9 @@ pub struct App {
     files_requested: bool,
     file_cursor: usize,
     diff_scroll: usize,
+    detail_scroll: usize,
+    /// The furthest the open tab can scroll; the detail view records it each draw.
+    detail_scroll_max: Cell<usize>,
     list_cursor: usize,
     mine_rows: Vec<PrSummary>,
     account_count: usize,
@@ -302,6 +306,7 @@ impl App {
         self.files_requested = false;
         self.file_cursor = 0;
         self.diff_scroll = 0;
+        self.detail_scroll = 0;
     }
 
     /// Returns whether the result was applied.

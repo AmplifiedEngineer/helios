@@ -43,7 +43,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
         },
     };
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph.scroll((files_scroll(app, area), 0)), area);
+    let scroll = if app.tab == DetailTab::Files {
+        files_scroll(app, area)
+    } else {
+        let rows = paragraph.line_count(area.width);
+        app.set_detail_scroll_max(rows.saturating_sub(usize::from(area.height)));
+        u16::try_from(app.detail_scroll()).unwrap_or(u16::MAX)
+    };
+    frame.render_widget(paragraph.scroll((scroll, 0)), area);
 }
 
 /// How far the Files tab scrolls so the selected file stays in view.
