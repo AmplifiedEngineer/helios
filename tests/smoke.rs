@@ -2,9 +2,9 @@
 
 use chrono::{TimeZone, Utc};
 use helios::github::errors::GithubError;
-use helios::github::queries::{ListKind, Listing};
+use helios::github::queries::{FilesListing, ListKind, Listing};
 use helios::github::GithubApi;
-use helios::model::{ChangedFile, PrDetail, PrKey, PrSummary};
+use helios::model::{PrDetail, PrKey, PrSummary};
 use helios::sanitize::sanitize;
 use helios::smoke::{self, SmokeAccount};
 
@@ -75,7 +75,7 @@ impl GithubApi for FakeApi {
         Err(GithubError::NotFoundOrHidden)
     }
 
-    async fn files(&self, _: &str, _: &str, _: u64) -> Result<Vec<ChangedFile>, GithubError> {
+    async fn files(&self, _: &str, _: &str, _: u64) -> Result<FilesListing, GithubError> {
         Err(GithubError::NotFoundOrHidden)
     }
 }

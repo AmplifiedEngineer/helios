@@ -14,11 +14,11 @@ use serde::Deserialize;
 use crate::accounts::{self, Account};
 use crate::github::errors::GithubError;
 use crate::github::queries::{
-    detail_variables, files_path, map_detail, map_files, map_page, query_variables, ListKind,
-    Listing, Pager, DETAIL_QUERY, LIST_QUERY,
+    detail_variables, files_path, map_detail, map_files, map_page, query_variables, FilesListing,
+    ListKind, Listing, Pager, DETAIL_QUERY, FILES_PER_PAGE, LIST_QUERY,
 };
 use crate::github::GithubApi;
-use crate::model::{ChangedFile, PrDetail};
+use crate::model::PrDetail;
 use crate::secret::Secret;
 
 /// Wait applied to a rate limit error that carries no reset header.
@@ -78,6 +78,8 @@ const GRAPHQL_PATH: &str = "/graphql";
 const GHES_REST_SUFFIX: &str = "/v3";
 /// Most pages `get_pages` reads: 3000 changed files at 100 per page.
 pub const MAX_PAGES: usize = 30;
+/// Most changed files the Files tab loads.
+pub const MAX_FILES: usize = MAX_PAGES * FILES_PER_PAGE;
 /// Shape of the pull request files path built by `queries::files_path`.
 const FILES_PATH_TEMPLATE: &str = "/repos/{owner}/{repo}/pulls/{number}/files";
 /// Text the timeout layer's error carries.
@@ -223,12 +225,24 @@ impl Octo {
     /// `GithubError::Decode`, so the token never goes to another host and a
     /// truncated list is never passed off as complete.
     pub async fn get_pages(&self, path: &str) -> Result<Vec<serde_json::Value>, GithubError> {
+        match self.walk_pages(path).await? {
+            (items, false) => Ok(items),
+            (_, true) => Err(GithubError::Decode),
+        }
+    }
+
+    /// Like `get_pages`, but a walk that reaches `MAX_PAGES` with a next link left
+    /// returns the items read so far, flagged as cut, instead of an error.
+    async fn walk_pages(&self, path: &str) -> Result<(Vec<serde_json::Value>, bool), GithubError> {
         let mut items = Vec::new();
         let mut next = Some(path.to_string());
         let mut seen = HashSet::new();
         let mut client = self.client()?;
         while let Some(current) = next {
-            if seen.len() >= MAX_PAGES || !seen.insert(current.clone()) {
+            if seen.len() >= MAX_PAGES {
+                return Ok((items, true));
+            }
+            if !seen.insert(current.clone()) {
                 return Err(GithubError::Decode);
             }
             let (page, link) = match self.get_page_once(&client, &current).await {
@@ -244,7 +258,7 @@ impl Octo {
                 None => None,
             };
         }
-        Ok(items)
+        Ok((items, false))
     }
 
     /// Fetches one page with `client`, which carries the token for the whole walk.
@@ -340,12 +354,13 @@ impl GithubApi for Octo {
         owner: &str,
         repo: &str,
         number: u64,
-    ) -> Result<Vec<ChangedFile>, GithubError> {
-        let items = self
-            .get_pages(&files_path(owner, repo, number, FIRST_FILES_PAGE))
+    ) -> Result<FilesListing, GithubError> {
+        let (items, truncated) = self
+            .walk_pages(&files_path(owner, repo, number, FIRST_FILES_PAGE))
             .await?;
         let json = serde_json::Value::Array(items).to_string();
-        map_files(&json).map_err(|_| GithubError::Decode)
+        let files = map_files(&json).map_err(|_| GithubError::Decode)?;
+        Ok(FilesListing { files, truncated })
     }
 }
 

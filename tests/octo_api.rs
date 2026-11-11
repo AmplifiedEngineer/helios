@@ -13,8 +13,10 @@ use std::time::Duration;
 
 use helios::accounts::{Account, AccountState};
 use helios::github::errors::GithubError;
-use helios::github::octo::{Octo, TokenSource};
-use helios::github::queries::{files_path, map_detail, map_files, map_page, ListKind};
+use helios::github::octo::{Octo, TokenSource, MAX_FILES, MAX_PAGES};
+use helios::github::queries::{
+    files_path, map_detail, map_files, map_page, ListKind, FILES_PER_PAGE,
+};
 use helios::github::GithubApi;
 use helios::model::PrSummary;
 use helios::secret::Secret;
@@ -156,10 +158,80 @@ async fn octo_files_returns_the_mapped_files() {
     let api = octo(&server);
 
     // Act
-    let files = api.files(OWNER, REPO, NUMBER).await.expect("files");
+    let listing = api.files(OWNER, REPO, NUMBER).await.expect("files");
 
     // Assert
-    assert_eq!(files, expected);
+    assert_eq!(listing.files, expected);
+    assert!(!listing.truncated);
+}
+
+/// One page of `FILES_PER_PAGE` distinct files, linked to the next page unless `last`.
+fn files_page_response(page: usize, last: bool) -> ScriptedResponse {
+    let nodes: Vec<serde_json::Value> = (0..FILES_PER_PAGE)
+        .map(|index| {
+            serde_json::json!({
+                "filename": format!("dir/{page}/file-{index}.rs"),
+                "previous_filename": null,
+                "status": "modified",
+                "changes": 1,
+                "blob_url": "https://github.com/o/r/blob/a/f",
+                "patch": "@@ -1 +1 @@\n-a\n+b"
+            })
+        })
+        .collect();
+    let response = ScriptedResponse::json(OK, &serde_json::Value::Array(nodes).to_string());
+    if last {
+        response
+    } else {
+        let next = files_path(OWNER, REPO, NUMBER, page + 1);
+        response.with_header("Link", &format!("<{next}>; rel=\"next\""))
+    }
+}
+
+/// A server that serves `pages` pages of files, linking each to the next except the last.
+fn files_server(pages: usize) -> TestServer {
+    TestServer::start_with(move |request| {
+        let page = (FIRST_PAGE..=pages)
+            .find(|page| request.path == files_path(OWNER, REPO, NUMBER, *page));
+        match page {
+            Some(page) => files_page_response(page, page == pages),
+            None => ScriptedResponse::json(NOT_FOUND, "{}"),
+        }
+    })
+}
+
+#[tokio::test]
+async fn octo_files_of_more_than_the_cap_returns_the_cap_and_marks_it_cut() {
+    // Arrange
+    let server = files_server(MAX_PAGES + 1);
+    let api = octo(&server);
+
+    // Act
+    let listing = api.files(OWNER, REPO, NUMBER).await.expect("files");
+
+    // Assert
+    assert_eq!(listing.files.len(), MAX_FILES);
+    assert!(listing.truncated);
+    assert_eq!(
+        server.requests().len(),
+        MAX_PAGES,
+        "no request past the cap"
+    );
+}
+
+#[tokio::test]
+async fn octo_files_of_exactly_the_cap_is_not_marked_cut() {
+    // Arrange
+    let server = files_server(MAX_PAGES);
+    let api = octo(&server);
+
+    // Act
+    let listing = api.files(OWNER, REPO, NUMBER).await.expect("files");
+
+    // Assert
+    assert_eq!(listing.files.len(), MAX_FILES);
+    assert!(!listing.truncated);
+    assert_eq!(server.requests().len(), MAX_PAGES);
 }
 
 #[tokio::test]

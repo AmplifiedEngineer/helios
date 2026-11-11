@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use helios::app::refresh::Clock;
 use helios::app::{App, DetailState, DetailTab, LoadRequest, Screen};
 use helios::github::errors::GithubError;
+use helios::github::octo::MAX_FILES;
 use helios::github::queries::{map_detail, map_files};
 use helios::model::PrKey;
 use helios::tui::detail;
@@ -504,4 +505,35 @@ fn a_selected_file_with_a_long_wrapped_path_stays_on_screen() {
         screen.contains("dir/9/"),
         "selected file off screen:\n{screen}"
     );
+}
+
+#[test]
+fn files_tab_notes_when_the_list_is_cut() {
+    // Arrange
+    let mut app = open_detail(DetailTab::Files);
+    let json = fs::read_to_string(FILES_FIXTURE).expect("read the files fixture");
+    app.apply_files(&key(), map_files(&json).expect("map the files fixture"));
+    app.mark_files_truncated(&key());
+
+    // Act
+    let screen = render_detail(&app);
+
+    // Assert
+    let note = format!("Showing the first {MAX_FILES} files");
+    assert!(screen.contains(&note), "{screen}");
+    assert!(position(&screen, &note) < position(&screen, "data/huge.json"));
+}
+
+#[test]
+fn files_tab_has_no_note_when_the_list_is_whole() {
+    // Arrange
+    let mut app = open_detail(DetailTab::Files);
+    let json = fs::read_to_string(FILES_FIXTURE).expect("read the files fixture");
+    app.apply_files(&key(), map_files(&json).expect("map the files fixture"));
+
+    // Act
+    let screen = render_detail(&app);
+
+    // Assert
+    assert!(!screen.contains("Showing the first"), "{screen}");
 }

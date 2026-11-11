@@ -232,7 +232,12 @@ where
                 Message::Files(key, result) => {
                     self.note_failure(result.as_ref().err());
                     match result {
-                        Ok(files) => self.app.apply_files(&key, files),
+                        Ok(listing) => {
+                            self.app.apply_files(&key, listing.files);
+                            if listing.truncated {
+                                self.app.mark_files_truncated(&key);
+                            }
+                        }
                         Err(error) => self.app.apply_files_failure(&key, error),
                     }
                 }

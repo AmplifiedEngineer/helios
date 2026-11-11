@@ -10,6 +10,7 @@ use ratatui::Frame;
 
 use crate::app::refresh::Clock;
 use crate::app::{App, DetailState, DetailTab};
+use crate::github::octo::MAX_FILES;
 use crate::model::{
     ChangedFile, CheckRun, CheckRunState, Comment, CommitSummary, DiffGap, FileDiff, PrDetail,
     PrState, ReviewDecision,
@@ -21,6 +22,8 @@ const THREADS_HEADING: &str = "Review threads";
 const REPLY_INDENT: &str = "  ";
 const LOADING_TEXT: &str = "Loading...";
 const PARTIAL_NOTE: &str = "Some items are not shown: GitHub has more than were fetched.";
+const FILES_CUT_NOTE_PREFIX: &str = "Showing the first";
+const FILES_CUT_NOTE_SUFFIX: &str = "files";
 const FILES_LOADING_TEXT: &str = "Loading files...";
 const MARK_RENAMED_FROM: &str = "renamed from";
 const MARK_TRUNCATED: &str = "truncated";
@@ -59,7 +62,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
 /// the rows a long path wraps onto.
 fn files_scroll(app: &App, lines: &[Line<'static>], area: Rect) -> u16 {
     let selected = app.file_cursor();
-    let through_selected: Vec<Line<'static>> = lines.iter().take(selected + 1).cloned().collect();
+    let note_rows = usize::from(app.files_truncated());
+    let through_selected: Vec<Line<'static>> = lines
+        .iter()
+        .take(selected + note_rows + 1)
+        .cloned()
+        .collect();
     let rows = Paragraph::new(through_selected)
         .wrap(Wrap { trim: false })
         .line_count(area.width);
@@ -130,10 +138,13 @@ fn file_lines(app: &App) -> Vec<Line<'static>> {
         return vec![Line::from(FILES_LOADING_TEXT)];
     };
     let selected = app.file_cursor();
-    files
-        .iter()
-        .enumerate()
-        .map(|(index, file)| {
+    let note = app.files_truncated().then(|| {
+        Line::from(format!(
+            "{FILES_CUT_NOTE_PREFIX} {MAX_FILES} {FILES_CUT_NOTE_SUFFIX}"
+        ))
+    });
+    note.into_iter()
+        .chain(files.iter().enumerate().map(|(index, file)| {
             let marks = file_marks(file);
             let line = if marks.is_empty() {
                 Line::from(file.path.to_string())
@@ -145,7 +156,7 @@ fn file_lines(app: &App) -> Vec<Line<'static>> {
             } else {
                 line
             }
-        })
+        }))
         .collect()
 }
 

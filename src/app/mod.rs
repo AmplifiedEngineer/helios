@@ -111,6 +111,7 @@ pub struct App {
     detail: DetailState,
     files: Option<Vec<ChangedFile>>,
     files_failure: Option<GithubError>,
+    files_truncated: bool,
     files_requested: bool,
     file_cursor: usize,
     diff_scroll: usize,
@@ -229,6 +230,18 @@ impl App {
         }
     }
 
+    /// Notes that the pull request has more files than the Files tab loaded.
+    pub fn mark_files_truncated(&mut self, key: &PrKey) {
+        if self.selected.as_ref() == Some(key) {
+            self.files_truncated = true;
+        }
+    }
+
+    /// Whether the loaded files are only the first part of the pull request's files.
+    pub fn files_truncated(&self) -> bool {
+        self.files_truncated
+    }
+
     /// The changed files of the open pull request, once loaded.
     pub fn files(&self) -> Option<&[ChangedFile]> {
         self.files.as_deref()
@@ -303,6 +316,7 @@ impl App {
     fn reset_files(&mut self) {
         self.files = None;
         self.files_failure = None;
+        self.files_truncated = false;
         self.files_requested = false;
         self.file_cursor = 0;
         self.diff_scroll = 0;
