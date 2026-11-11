@@ -12,10 +12,19 @@ use serde::Deserialize;
 
 use crate::accounts::{self, Account};
 use crate::github::errors::GithubError;
+use crate::github::queries::{
+    detail_variables, files_path, map_detail, map_files, map_page, query_variables, ListKind,
+    Pager, DETAIL_QUERY, LIST_QUERY,
+};
+use crate::github::GithubApi;
+use crate::model::{ChangedFile, PrDetail, PrSummary};
 use crate::secret::Secret;
 
 /// Wait applied to a rate limit error that carries no reset header.
 pub const DEFAULT_RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(60);
+
+/// How long one request, or one `gh` call, may take.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Supplies the token for each request, so a rotated token is picked up.
 pub trait TokenSource: Send + Sync {
@@ -61,6 +70,8 @@ const LINK_HEADER: &str = "link";
 const NEXT_RELATION: &str = "rel=\"next\"";
 /// Prefix of a scheme-relative target, which names another host.
 const SCHEME_RELATIVE_PREFIX: &str = "//";
+/// `get_pages` follows the links from the first page.
+const FIRST_FILES_PAGE: usize = 1;
 const GRAPHQL_PATH: &str = "/graphql";
 /// Shape of the pull request files path built by `queries::files_path`.
 const FILES_PATH_TEMPLATE: &str = "/repos/{owner}/{repo}/pulls/{number}/files";
@@ -81,6 +92,8 @@ pub const ENDPOINTS: &[&str] = &[GRAPHQL_PATH, FILES_PATH_TEMPLATE];
 
 /// The GitHub client for one account.
 pub struct Octo {
+    host: String,
+    login: String,
     base_uri: String,
     timeout: Duration,
     token_source: Arc<dyn TokenSource>,
@@ -102,12 +115,14 @@ struct RawGraphqlResponse {
 
 impl Octo {
     pub fn new(
-        _account: &Account,
+        account: &Account,
         base_uri: &str,
         timeout: Duration,
         token_source: Arc<dyn TokenSource>,
     ) -> Result<Self, GithubError> {
         Ok(Self {
+            host: account.host.clone(),
+            login: account.login.clone(),
             base_uri: base_uri.to_string(),
             timeout,
             token_source,
@@ -128,27 +143,35 @@ impl Octo {
 
     /// Runs a GraphQL query. A 401 re-fetches the token and retries once.
     pub async fn graphql(&self, query: &str) -> Result<GraphqlResponse, GithubError> {
-        match self.graphql_once(query).await {
-            Err(GithubError::AuthRequired) => self.graphql_once(query).await,
+        self.graphql_with(query, &serde_json::Value::Null).await
+    }
+
+    /// Runs a GraphQL query with its variables. A 401 re-fetches the token and retries once.
+    pub async fn graphql_with(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<GraphqlResponse, GithubError> {
+        match self.graphql_once(query, variables).await {
+            Err(GithubError::AuthRequired) => self.graphql_once(query, variables).await,
             other => other,
         }
     }
 
-    async fn graphql_once(&self, query: &str) -> Result<GraphqlResponse, GithubError> {
+    async fn graphql_once(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<GraphqlResponse, GithubError> {
         let client = self.client()?;
-        let payload = serde_json::json!({ "query": query });
+        let payload = serde_json::json!({ "query": query, "variables": variables });
         let response = client
             ._post(GRAPHQL_PATH, Some(&payload))
             .await
             .map_err(transport_error)?;
-        let status = response.status();
-        let signals = {
-            let header = header_text(|name| response.headers().get(name));
-            Signals::read(&header)
-        };
-        if !status.is_success() {
-            return Err(map_status(status.as_u16(), signals));
-        }
+        let (_, signals) = check_status(response.status().as_u16(), |name| {
+            response.headers().get(name)
+        })?;
         let body = client
             .body_to_string(response)
             .await
@@ -189,14 +212,9 @@ impl Octo {
     async fn get_page_once(&self, path: &str) -> Result<Page, GithubError> {
         let client = self.client()?;
         let response = client._get(path).await.map_err(transport_error)?;
-        let status = response.status();
-        let (link, signals) = {
-            let header = header_text(|name| response.headers().get(name));
-            (header(LINK_HEADER), Signals::read(&header))
-        };
-        if !status.is_success() {
-            return Err(map_status(status.as_u16(), signals));
-        }
+        let (link, _) = check_status(response.status().as_u16(), |name| {
+            response.headers().get(name)
+        })?;
         let body = client
             .body_to_string(response)
             .await
@@ -216,6 +234,72 @@ impl Octo {
             .set_read_timeout(Some(self.timeout))
             .build()
             .map_err(|_| GithubError::Network)
+    }
+}
+
+impl Octo {
+    /// The body text of a GraphQL answer that carries data.
+    async fn graphql_body(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<String, GithubError> {
+        let response = self.graphql_with(query, variables).await?;
+        let data = response.data.ok_or(GithubError::Decode)?;
+        let errors: Vec<_> = response
+            .errors
+            .iter()
+            .map(|error| serde_json::json!({ "message": error.message }))
+            .collect();
+        Ok(serde_json::json!({ "data": data, "errors": errors }).to_string())
+    }
+}
+
+impl GithubApi for Octo {
+    async fn list(&self, kind: ListKind) -> Result<Vec<PrSummary>, GithubError> {
+        let mut pager = Pager::default();
+        loop {
+            let variables = query_variables(kind, pager.cursor());
+            let body = self.graphql_body(LIST_QUERY, &variables).await?;
+            let page = map_page(&self.host, &self.login, &body).map_err(|_| GithubError::Decode)?;
+            if !pager.push(page) {
+                return Ok(pager.finish().rows);
+            }
+        }
+    }
+
+    async fn detail(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetail, GithubError> {
+        let variables = detail_variables(owner, repo, number);
+        let body = self.graphql_body(DETAIL_QUERY, &variables).await?;
+        map_detail(&body).map_err(|_| GithubError::Decode)
+    }
+
+    async fn files(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<ChangedFile>, GithubError> {
+        let items = self
+            .get_pages(&files_path(owner, repo, number, FIRST_FILES_PAGE))
+            .await?;
+        let json = serde_json::Value::Array(items).to_string();
+        map_files(&json).map_err(|_| GithubError::Decode)
+    }
+}
+
+/// The `Link` header and rate limit signals of a successful response; any other
+/// status becomes its error. `get` looks a header up by lowercase name.
+fn check_status<V: AsRef<[u8]>>(
+    status: u16,
+    get: impl Fn(&str) -> Option<V>,
+) -> Result<(Option<String>, Signals), GithubError> {
+    let header = header_text(get);
+    let signals = Signals::read(&header);
+    if (200..300).contains(&status) {
+        Ok((header(LINK_HEADER), signals))
+    } else {
+        Err(map_status(status, signals))
     }
 }
 
