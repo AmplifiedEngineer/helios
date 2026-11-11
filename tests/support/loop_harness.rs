@@ -18,7 +18,7 @@ use helios::app::loader::{Loader, Source};
 use helios::app::refresh::Clock;
 use helios::app::App;
 use helios::github::errors::GithubError;
-use helios::github::queries::ListKind;
+use helios::github::queries::{ListKind, Listing};
 use helios::github::GithubApi;
 use helios::model::{ChangedFile, PrDetail, PrKey, PrState, PrSummary, ReviewDecision};
 use helios::sanitize::sanitize;
@@ -97,15 +97,19 @@ impl FakeApi {
 }
 
 impl GithubApi for FakeApi {
-    async fn list(&self, kind: ListKind) -> Result<Vec<PrSummary>, GithubError> {
+    async fn list(&self, kind: ListKind) -> Result<Listing, GithubError> {
         self.list_calls.fetch_add(1, Ordering::SeqCst);
         Self::fail(self.failure)?;
         let login = self.login.as_str();
-        Ok(match kind {
+        let rows = match kind {
             ListKind::Mine => vec![summary(login, 1, "Mine one"), summary(login, 2, "Mine two")],
             ListKind::Review => vec![summary(login, 10, "Review ten")],
             ListKind::Assigned => vec![summary(login, 11, "Assigned eleven")],
             _ => Vec::new(),
+        };
+        Ok(Listing {
+            rows,
+            partial: false,
         })
     }
 

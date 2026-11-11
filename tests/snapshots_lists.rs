@@ -56,6 +56,7 @@ fn needs_me_app() -> App {
     let generation = app.begin_refresh();
     let applied = app.apply(Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Ok(rows),
@@ -214,6 +215,7 @@ fn escape_fixture_renders_clean_in_every_list_column() {
     let generation = app.begin_refresh();
     app.apply(Loaded {
         generation,
+        partial: false,
         host: hidden_host.into(),
         account: ACCOUNT.into(),
         result: Ok(rows),
@@ -254,6 +256,7 @@ fn failed_host_shows_its_state_while_the_other_host_rows_stay() {
     let rows = merge_needs_me(fixture_rows(REVIEW_FIXTURE), fixture_rows(ASSIGNED_FIXTURE));
     app.apply(Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Ok(rows),
@@ -262,6 +265,7 @@ fn failed_host_shows_its_state_while_the_other_host_rows_stay() {
     // Act
     app.apply(Loaded {
         generation,
+        partial: false,
         host: DOWN_HOST.into(),
         account: ACCOUNT.into(),
         result: Err(GithubError::Network),
@@ -299,4 +303,39 @@ fn the_mine_view_ignores_the_tag_filter_and_shows_every_row() {
     // Assert
     assert_shows(&screen, &REVIEW_TITLES);
     assert_shows(&screen, &ASSIGNED_TITLES);
+}
+
+#[test]
+fn a_cut_list_shows_a_partial_note() {
+    // Arrange
+    let mut app = needs_me_app();
+    let generation = app.begin_refresh();
+    app.apply(Loaded {
+        generation,
+        partial: true,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Ok(merge_needs_me(
+            fixture_rows(REVIEW_FIXTURE),
+            fixture_rows(ASSIGNED_FIXTURE),
+        )),
+    });
+
+    // Act
+    let screen = render_needs_me(&app);
+
+    // Assert
+    assert_shows(&screen, &["Some rows are not shown"]);
+}
+
+#[test]
+fn a_whole_list_shows_no_partial_note() {
+    // Arrange
+    let app = needs_me_app();
+
+    // Act
+    let screen = render_needs_me(&app);
+
+    // Assert
+    assert_hides(&screen, &["Some rows are not shown"]);
 }

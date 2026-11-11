@@ -2,8 +2,10 @@
 
 use helios::app::refresh::{Clock, Scheduler, REFRESH_INTERVAL};
 use helios::app::Screen;
+use helios::cli::{parse, REFRESH_SECS_MAX, REFRESH_SECS_MIN};
 use helios::github::errors::GithubError;
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -181,4 +183,102 @@ fn retry_after_wins_when_both_are_present_and_reset_is_earlier() {
 
     // Assert
     assert_waits_until(&mut scheduler, &clock, LONG_WAIT);
+}
+
+#[test]
+fn manual_refresh_is_refused_while_rate_limited() {
+    // Arrange
+    let (mut scheduler, clock) = scheduler();
+    scheduler.on_error(&GithubError::RateLimited {
+        retry_at: clock.after(LONG_WAIT),
+    });
+    clock.advance(TWO_MINUTES);
+
+    // Act
+    let fired = scheduler.manual();
+
+    // Assert
+    assert!(
+        !fired,
+        "the refresh key hammered GitHub during a rate limit"
+    );
+    assert_waits_until(&mut scheduler, &clock, LONG_WAIT - TWO_MINUTES);
+}
+
+#[test]
+fn manual_refresh_is_refused_during_a_header_backoff() {
+    // Arrange
+    let (mut scheduler, clock) = scheduler();
+    scheduler.back_off(Some(clock.after(SHORT_WAIT)), None);
+
+    // Act
+    let fired = scheduler.manual();
+
+    // Assert
+    assert!(!fired);
+}
+
+#[test]
+fn manual_refresh_fires_once_the_backoff_has_ended() {
+    // Arrange
+    let (mut scheduler, clock) = scheduler();
+    scheduler.back_off(Some(clock.after(SHORT_WAIT)), None);
+    clock.advance(SHORT_WAIT);
+
+    // Act
+    let fired = scheduler.manual();
+
+    // Assert
+    assert!(fired, "the refresh key stayed blocked after the backoff");
+}
+
+#[test]
+fn with_interval_sets_the_automatic_refresh_period() {
+    // Arrange
+    let clock = FakeClock::new();
+    let mut scheduler = Scheduler::with_interval(clock.clone(), SHORT_WAIT);
+
+    // Act
+    clock.advance(SHORT_WAIT - ONE_SECOND);
+    let early = scheduler.tick(Screen::List);
+    clock.advance(ONE_SECOND);
+    let due = scheduler.tick(Screen::List);
+    clock.advance(SHORT_WAIT - ONE_SECOND);
+    let early_again = scheduler.tick(Screen::List);
+
+    // Assert
+    assert!(!early && due && !early_again);
+}
+
+#[test]
+fn with_interval_clamps_zero_and_huge_values_to_the_flag_bounds() {
+    // Arrange
+    let zero_clock = FakeClock::new();
+    let mut zero = Scheduler::with_interval(zero_clock.clone(), Duration::ZERO);
+    let huge_clock = FakeClock::new();
+    let mut huge = Scheduler::with_interval(huge_clock.clone(), Duration::MAX);
+
+    // Act
+    let zero_now = zero.tick(Screen::List);
+    zero_clock.advance(Duration::from_secs(REFRESH_SECS_MIN));
+    let zero_min = zero.tick(Screen::List);
+    huge_clock.advance(Duration::from_secs(REFRESH_SECS_MAX));
+    let huge_max = huge.tick(Screen::List);
+
+    // Assert
+    assert!(!zero_now, "a zero interval refreshed on every tick");
+    assert!(zero_min);
+    assert!(huge_max, "a huge interval never refreshes");
+}
+
+#[test]
+fn the_default_scheduler_matches_the_default_cli_interval() {
+    // Arrange
+    let config = parse(&[], &HashMap::new()).expect("defaults parse");
+
+    // Act
+    let interval = Duration::from_secs(config.refresh_secs);
+
+    // Assert
+    assert_eq!(interval, REFRESH_INTERVAL);
 }

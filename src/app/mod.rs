@@ -2,7 +2,7 @@
 
 //! The state the screens draw from and the workers feed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
@@ -122,6 +122,7 @@ pub struct App {
     cursor: usize,
     rows: Vec<PrSummary>,
     host_failures: BTreeMap<AccountKey, GithubError>,
+    partial_accounts: BTreeSet<AccountKey>,
 }
 
 impl DetailTab {
@@ -191,6 +192,11 @@ impl App {
     /// The accounts whose latest load failed, by host and login.
     pub fn host_failures(&self) -> &BTreeMap<AccountKey, GithubError> {
         &self.host_failures
+    }
+
+    /// Whether any account's latest list was cut short by GitHub.
+    pub fn has_partial_list(&self) -> bool {
+        !self.partial_accounts.is_empty()
     }
 
     /// Opens a pull request from the list: shows the loading state and asks for its detail.
@@ -304,6 +310,7 @@ impl App {
         self.keep_highlight(|app| match loaded.result {
             Ok(rows) => {
                 app.clear_failure(&loaded.host, &loaded.account);
+                app.track_partial(&loaded.host, &loaded.account, loaded.partial);
                 app.rows
                     .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
                 app.rows.extend(rows);
@@ -325,6 +332,7 @@ impl App {
         self.keep_highlight(|app| match loaded.result {
             Ok(rows) => {
                 app.clear_failure(&loaded.host, &loaded.account);
+                app.track_partial(&loaded.host, &loaded.account, loaded.partial);
                 app.mine_rows
                     .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
                 app.mine_rows.extend(rows);
@@ -332,6 +340,15 @@ impl App {
             Err(error) => app.record_failure(loaded.host, loaded.account, error),
         });
         true
+    }
+
+    fn track_partial(&mut self, host: &str, account: &str, partial: bool) {
+        let account = (host.to_owned(), account.to_owned());
+        if partial {
+            self.partial_accounts.insert(account);
+        } else {
+            self.partial_accounts.remove(&account);
+        }
     }
 
     fn clear_failure(&mut self, host: &str, account: &str) {

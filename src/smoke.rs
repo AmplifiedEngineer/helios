@@ -33,9 +33,9 @@ struct Counts {
 }
 
 async fn count_account<A: GithubApi>(api: &A, show_drafts: bool) -> Result<Counts, GithubError> {
-    let mine = filter_drafts(api.list(ListKind::Mine).await?, show_drafts);
-    let review = api.list(ListKind::Review).await?;
-    let assigned = api.list(ListKind::Assigned).await?;
+    let mine = filter_drafts(api.list(ListKind::Mine).await?.rows, show_drafts);
+    let review = api.list(ListKind::Review).await?.rows;
+    let assigned = api.list(ListKind::Assigned).await?.rows;
     let needs_me = filter_drafts(merge_needs_me(review, assigned), show_drafts);
     Ok(Counts {
         mine: mine.len(),

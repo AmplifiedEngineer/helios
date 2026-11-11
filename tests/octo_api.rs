@@ -98,10 +98,28 @@ async fn octo_list_returns_mapped_pull_requests() {
     let listed = api.list(ListKind::Mine).await.expect("list");
 
     // Assert
-    assert_eq!(listed, expected);
+    assert_eq!(listed.rows, expected);
+    assert!(!listed.partial, "a whole list is not partial");
     assert_eq!(server.requests().len(), 2, "follows the cursor to page two");
     assert!(server.requests()[0].path.ends_with("/graphql"));
     assert!(server.requests()[0].body.contains(ListKind::Mine.search()));
+}
+
+#[tokio::test]
+async fn octo_list_marks_a_page_with_graphql_errors_partial() {
+    // Arrange
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fixture("list/synthetic-review.json")).expect("fixture json");
+    value["errors"] = serde_json::json!([{ "message": "a node failed" }]);
+    let server = TestServer::start(ScriptedResponse::json(OK, &value.to_string()));
+    let api = octo(&server);
+
+    // Act
+    let listed = api.list(ListKind::Review).await.expect("list");
+
+    // Assert
+    assert!(listed.partial, "the cut list carried no partial flag");
+    assert!(!listed.rows.is_empty(), "the rows that arrived are kept");
 }
 
 #[tokio::test]

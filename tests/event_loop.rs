@@ -366,3 +366,24 @@ fn o_does_nothing_on_an_empty_list() {
     // Assert
     assert!(opened.lock().expect("sink lock").is_empty());
 }
+
+#[test]
+fn the_configured_refresh_interval_sets_when_the_list_refreshes() {
+    // Arrange
+    let mut harness = Harness::start(FakeApi::new());
+    let configured = Duration::from_secs(600);
+    harness.session.set_refresh_interval(configured);
+
+    // Act
+    harness.clock.advance(PAST_INTERVAL);
+    harness.step();
+    harness.settle();
+    let before_due = harness.list_calls.load(Ordering::SeqCst);
+    harness.clock.advance(configured);
+    harness.step();
+    harness.settle();
+
+    // Assert
+    assert_eq!(before_due, FIRST_LOAD_CALLS);
+    assert!(harness.list_calls.load(Ordering::SeqCst) > FIRST_LOAD_CALLS);
+}

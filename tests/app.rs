@@ -32,6 +32,7 @@ fn summary(number: u64) -> PrSummary {
 fn loaded(generation: u64, numbers: &[u64]) -> Loaded {
     Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Ok(numbers.iter().map(|n| summary(*n)).collect()),
@@ -136,6 +137,7 @@ fn summary_for(host: &str, account: &str, number: u64) -> PrSummary {
 fn loaded_for(generation: u64, host: &str, account: &str, numbers: &[u64]) -> Loaded {
     Loaded {
         generation,
+        partial: false,
         host: host.into(),
         account: account.into(),
         result: Ok(numbers
@@ -198,6 +200,7 @@ fn a_good_load_clears_only_its_own_accounts_failure() {
     for account in [ACCOUNT, OTHER_ACCOUNT] {
         app.apply(Loaded {
             generation,
+            partial: false,
             host: HOST.into(),
             account: account.into(),
             result: Err(GithubError::Network),
@@ -223,6 +226,7 @@ fn a_host_that_failed_and_then_loaded_shows_no_failure() {
     let generation = app.begin_refresh();
     app.apply(Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Err(GithubError::Network),
@@ -305,6 +309,7 @@ fn visible_rows_apply_the_draft_and_tag_rules() {
     };
     app.apply(Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Ok(vec![draft, reviewed, assigned]),
@@ -333,4 +338,23 @@ fn visible_rows_apply_the_draft_and_tag_rules() {
         vec![1, 2, 3],
         "the tag filter is off for Mine"
     );
+}
+
+#[test]
+fn a_cut_list_marks_its_account_partial_until_a_whole_one_replaces_it() {
+    // Arrange
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    let mut cut = loaded(generation, &[1]);
+    cut.partial = true;
+
+    // Act
+    app.apply(cut);
+    let after_cut = app.has_partial_list();
+    let generation = app.begin_refresh();
+    app.apply(loaded(generation, &[1, 2]));
+
+    // Assert
+    assert!(after_cut, "a cut list left no marker");
+    assert!(!app.has_partial_list(), "a whole list kept the marker");
 }

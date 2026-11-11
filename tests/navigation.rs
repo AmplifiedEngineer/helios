@@ -31,6 +31,7 @@ fn summary(number: u64, tags: Vec<Tag>) -> PrSummary {
 fn loaded(generation: u64, rows: Vec<PrSummary>) -> Loaded {
     Loaded {
         generation,
+        partial: false,
         host: HOST.into(),
         account: ACCOUNT.into(),
         result: Ok(rows),

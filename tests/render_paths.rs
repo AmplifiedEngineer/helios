@@ -179,6 +179,7 @@ fn list_app() -> App {
     let generation = app.begin_refresh();
     let applied = app.apply(Loaded {
         generation,
+        partial: false,
         host: dirty(HOST),
         account: ACCOUNT.into(),
         result: Ok(merge_needs_me(page.rows, Vec::new())),

@@ -34,6 +34,7 @@ fn app() -> App {
     let generation = app.begin_refresh();
     let load = |rows| Loaded {
         generation,
+        partial: false,
         host: "github.com".into(),
         account: "octo".into(),
         result: Ok(rows),
