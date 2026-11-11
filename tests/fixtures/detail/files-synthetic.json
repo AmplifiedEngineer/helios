@@ -1,0 +1,71 @@
+[
+  {
+    "sha": "1111111111111111111111111111111111111111",
+    "filename": "src/lib.rs",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 1,
+    "changes": 3,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/src/lib.rs",
+    "patch": "@@ -1,2 +1,3 @@\n fn main() {}\n-old\n+new\n+newer"
+  },
+  {
+    "sha": "2222222222222222222222222222222222222222",
+    "filename": "data/huge.json",
+    "status": "modified",
+    "additions": 4000,
+    "deletions": 1000,
+    "changes": 5000,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/data/huge.json"
+  },
+  {
+    "sha": "3333333333333333333333333333333333333333",
+    "filename": "assets/logo.png",
+    "status": "modified",
+    "additions": 0,
+    "deletions": 0,
+    "changes": 0,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/assets/logo.png"
+  },
+  {
+    "sha": "4444444444444444444444444444444444444444",
+    "filename": "src/renamed.rs",
+    "status": "renamed",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/src/renamed.rs",
+    "previous_filename": "src/original.rs",
+    "patch": "@@ -1 +1,2 @@\n kept\n+added"
+  },
+  {
+    "sha": "5555555555555555555555555555555555555555",
+    "filename": "src/\u001b[31mred\u001b[0m.rs",
+    "status": "renamed",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/src/red.rs",
+    "previous_filename": "src/\u001b]0;pwned\u0007before.rs",
+    "patch": "@@ -1 +1 @@\n-a\n+\u001b[2Jb"
+  },
+  {
+    "sha": "6666666666666666666666666666666666666666",
+    "filename": "src/moved.rs",
+    "status": "renamed",
+    "additions": 0,
+    "deletions": 0,
+    "changes": 0,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/src/moved.rs",
+    "previous_filename": "src/old_home.rs"
+  },
+  {
+    "sha": "7777777777777777777777777777777777777777",
+    "filename": "src/empty.rs",
+    "status": "added",
+    "additions": 0,
+    "deletions": 0,
+    "changes": 0,
+    "blob_url": "https://github.com/octo/widgets/blob/abc123/src/empty.rs"
+  }
+]
