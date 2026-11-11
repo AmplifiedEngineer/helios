@@ -1,7 +1,7 @@
 [Mine]  Needs me  |
-REPO                     #    ┌Keys──────────────────────────────────┐  REVIEW     CHECKS   UPDATED
-org/repo                 #1   │j/k move                              │                      2h
-org/repo                 #2   │g/G first/last                        │                      2h
+REPO                     #    ┌Keys──────────────────────────────────┐         AUTHOR       UPDATED
+org/repo                 #1   │j/k move                              │         octo         2h
+org/repo                 #2   │g/G first/last                        │         octo         2h
                               │Enter open                            │
                               │m mine/needs me                       │
                               │r refresh                             │

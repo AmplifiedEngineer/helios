@@ -9,7 +9,7 @@ use helios::app::worker::Loaded;
 use helios::app::{App, ListFilter};
 use helios::github::errors::GithubError;
 use helios::github::queries::{map_page, merge_needs_me};
-use helios::model::PrSummary;
+use helios::model::{PrSummary, ReviewDecision};
 use helios::sanitize::sanitize;
 use helios::tui::{mine, needs_me};
 use ratatui::backend::TestBackend;
@@ -469,4 +469,58 @@ fn a_repo_that_is_too_long_loses_its_start_and_keeps_the_name() {
     // Assert
     assert_shows(&screen, &["\u{2026}", "/helios-tui"]);
     assert_hides(&screen, &["an-organisation"]);
+}
+
+/// How many leading characters of the long title the screen shows.
+fn title_chars_shown(screen: &str) -> usize {
+    LONG_TITLE
+        .char_indices()
+        .map(|(end, c)| end + c.len_utf8())
+        .take_while(|end| screen.contains(&LONG_TITLE[..*end]))
+        .count()
+}
+
+fn review_row(number: u64, decision: Option<ReviewDecision>) -> PrSummary {
+    let mut row = wide_row(HOST, LONG_REPO, number);
+    row.review_decision = decision;
+    row
+}
+
+#[test]
+fn a_review_column_that_is_blank_on_every_row_is_hidden_and_the_title_gets_its_width() {
+    // Arrange
+    let blank = app_with(vec![review_row(7, None), review_row(8, None)]);
+    let reviewed = app_with(vec![
+        review_row(7, None),
+        review_row(8, Some(ReviewDecision::Approved)),
+    ]);
+
+    // Act
+    let without = render_needs_me_at(&blank, MEDIUM_WIDTH);
+    let with = render_needs_me_at(&reviewed, MEDIUM_WIDTH);
+
+    // Assert
+    assert_hides(header_line(&without), &["REVIEW"]);
+    assert_shows(header_line(&with), &["REVIEW"]);
+    assert!(
+        title_chars_shown(&without) > title_chars_shown(&with),
+        "the title got no extra room:\n{without}\n{with}"
+    );
+}
+
+#[test]
+fn one_non_blank_review_keeps_the_column() {
+    // Arrange
+    let app = app_with(vec![
+        review_row(7, None),
+        review_row(8, None),
+        review_row(9, Some(ReviewDecision::ChangesRequested)),
+    ]);
+
+    // Act
+    let screen = render_needs_me_at(&app, WIDE_WIDTH);
+
+    // Assert
+    assert_shows(header_line(&screen), &["REVIEW"]);
+    assert_shows(&screen, &["changes"]);
 }
