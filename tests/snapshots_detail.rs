@@ -217,7 +217,7 @@ fn files_tab_marks_truncated_binary_and_renamed_files() {
         "{screen}"
     );
     assert!(
-        line_with(&screen, "assets/logo.png").contains("binary"),
+        line_with(&screen, "assets/logo.png").contains("binary or mode change"),
         "{screen}"
     );
     let renamed = line_with(&screen, "src/renamed.rs");

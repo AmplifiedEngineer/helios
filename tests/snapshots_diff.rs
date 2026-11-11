@@ -3,7 +3,8 @@
 use helios::github::queries::map_files;
 use helios::model::ChangedFile;
 use helios::tui::diff::{
-    render_with, DiffOptions, BINARY_LINE, CUT_LINE, MAX_DIFF_LINES, TRUNCATED_LINE,
+    render_with, DiffOptions, ADDED_OR_REMOVED_NO_TEXT_LINE, CHANGED_NO_TEXT_LINE, CUT_LINE,
+    MAX_DIFF_LINES, TRUNCATED_LINE,
 };
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -176,12 +177,12 @@ fn a_truncated_file_renders_one_fixed_line() {
 
     // Assert
     assert_eq!(screen.matches(TRUNCATED_LINE).count(), 1, "{screen}");
-    assert!(!screen.contains(BINARY_LINE));
+    assert!(!screen.contains(CHANGED_NO_TEXT_LINE));
     assert_snapshot("diff_truncated", &screen);
 }
 
 #[test]
-fn a_binary_file_renders_one_fixed_line() {
+fn a_modified_file_without_text_says_binary_or_mode_change() {
     // Arrange: a modified file with no patch and no counted changes
     let file = file_with(None, "modified", 0);
 
@@ -189,9 +190,28 @@ fn a_binary_file_renders_one_fixed_line() {
     let screen = screen_text(&draw(&file, true, SCREEN_HEIGHT));
 
     // Assert
-    assert_eq!(screen.matches(BINARY_LINE).count(), 1, "{screen}");
+    assert_eq!(screen.matches(CHANGED_NO_TEXT_LINE).count(), 1, "{screen}");
     assert!(!screen.contains(TRUNCATED_LINE));
-    assert_snapshot("diff_binary", &screen);
+    assert_snapshot("diff_changed_no_text", &screen);
+}
+
+#[test]
+fn an_added_or_removed_file_without_text_says_empty_or_binary() {
+    for status in ["added", "removed"] {
+        // Arrange
+        let file = file_with(None, status, 0);
+
+        // Act
+        let screen = screen_text(&draw(&file, true, SCREEN_HEIGHT));
+
+        // Assert
+        assert_eq!(
+            screen.matches(ADDED_OR_REMOVED_NO_TEXT_LINE).count(),
+            1,
+            "{status}: {screen}"
+        );
+        assert!(!screen.contains(CHANGED_NO_TEXT_LINE), "{status}");
+    }
 }
 
 #[test]

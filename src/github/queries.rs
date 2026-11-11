@@ -368,7 +368,8 @@ pub enum FilesError {
 pub const FILES_PER_PAGE: usize = 100;
 
 const STATUS_RENAMED: &str = "renamed";
-const STATUS_MODIFIED: &str = "modified";
+const STATUS_ADDED: &str = "added";
+const STATUS_REMOVED: &str = "removed";
 
 /// The relative REST path of one page of a pull request's files.
 pub fn files_path(owner: &str, repo: &str, number: u64, page: usize) -> String {
@@ -386,16 +387,16 @@ struct FileNode {
 }
 
 impl FileNode {
-    /// A missing patch with no changes is told apart by status, since the REST entry carries no
-    /// binary flag; added and any other status with zero changes is an empty file.
+    /// A missing patch with no changes is told apart by status only, since the REST entry carries
+    /// no binary flag.
     fn gap(&self) -> DiffGap {
         if self.changes > 0 {
             return DiffGap::Truncated;
         }
         match self.status.as_str() {
             STATUS_RENAMED => DiffGap::RenamedOnly,
-            STATUS_MODIFIED => DiffGap::Binary,
-            _ => DiffGap::Empty,
+            STATUS_ADDED | STATUS_REMOVED => DiffGap::AddedOrRemovedNoText,
+            _ => DiffGap::ChangedNoText,
         }
     }
 

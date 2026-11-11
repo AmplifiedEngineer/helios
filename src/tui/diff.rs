@@ -28,8 +28,10 @@ pub const MAX_DIFF_LINES: usize = 500;
 pub const CUT_LINE: &str = "diff cut: too long to show here, open it on GitHub";
 /// Drawn when GitHub left the patch out because it is too large.
 pub const TRUNCATED_LINE: &str = "diff unavailable: GitHub truncated it, open it on GitHub";
-/// Drawn for a binary file.
-pub const BINARY_LINE: &str = "binary file: no text diff";
+/// Drawn for an added or removed file with no patch and no changes.
+pub const ADDED_OR_REMOVED_NO_TEXT_LINE: &str = "no text diff: empty or binary file";
+/// Drawn for any other file with no patch and no changes.
+pub const CHANGED_NO_TEXT_LINE: &str = "no text diff: binary file or mode change only";
 
 /// How the diff is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,8 +74,9 @@ pub fn render_scrolled(
 fn gap_line(gap: &DiffGap) -> Option<&'static str> {
     match gap {
         DiffGap::Truncated => Some(TRUNCATED_LINE),
-        DiffGap::Binary => Some(BINARY_LINE),
-        _ => None,
+        DiffGap::AddedOrRemovedNoText => Some(ADDED_OR_REMOVED_NO_TEXT_LINE),
+        DiffGap::ChangedNoText => Some(CHANGED_NO_TEXT_LINE),
+        DiffGap::RenamedOnly => None,
     }
 }
 
