@@ -2,10 +2,13 @@
 
 pub mod detail;
 pub mod diff;
+pub mod draw;
 pub mod keys;
 pub mod list;
 pub mod mine;
 pub mod needs_me;
+
+pub use draw::{draw, draw_with, SystemClock};
 
 use std::io::{self, Stdout, Write};
 use std::panic;

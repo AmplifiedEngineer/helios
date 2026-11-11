@@ -38,12 +38,25 @@ pub struct DiffOptions {
 
 /// Draws the diff of `file` with `options`. Every string is `Remote`, so it is already sanitized.
 pub fn render_with(frame: &mut Frame, area: Rect, file: &ChangedFile, options: DiffOptions) {
+    render_scrolled(frame, area, file, options, 0);
+}
+
+/// Draws the diff of `file` with `options`, starting `scroll` lines down the patch.
+pub fn render_scrolled(
+    frame: &mut Frame,
+    area: Rect,
+    file: &ChangedFile,
+    options: DiffOptions,
+    scroll: usize,
+) {
     let [header, body] =
         Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(0)]).areas(area);
     frame.render_widget(Paragraph::new(file.path.as_str()), header);
     match &file.diff {
         FileDiff::Patch(patch) => {
-            frame.render_widget(Paragraph::new(patch_lines(patch.as_str(), options)), body);
+            let offset = u16::try_from(scroll).unwrap_or(u16::MAX);
+            let lines = patch_lines(patch.as_str(), options);
+            frame.render_widget(Paragraph::new(lines).scroll((offset, 0)), body);
         }
         FileDiff::Unavailable { gap, .. } => {
             if let Some(line) = gap_line(gap) {

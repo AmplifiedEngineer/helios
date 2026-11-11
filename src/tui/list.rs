@@ -6,7 +6,8 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::widgets::{Paragraph, Row, Table};
+use ratatui::style::{Modifier, Style};
+use ratatui::widgets::{Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::app::refresh::Clock;
@@ -37,11 +38,20 @@ const SECONDS_PER_DAY: u64 = 86_400;
 
 /// Draws the rows that pass the draft toggle, and the tag filter when `by_tag` is set.
 pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, by_tag: bool) {
+    render_rows(frame, area, app, app.visible_rows(by_tag), clock, None);
+}
+
+/// Draws `rows`, with the one at `selected` highlighted, and a line for each failed account.
+pub fn render_rows(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    rows: Vec<&PrSummary>,
+    clock: &impl Clock,
+    selected: Option<usize>,
+) {
     let now = clock.now();
-    let rows = app
-        .visible_rows(by_tag)
-        .into_iter()
-        .map(|row| table_row(row, now));
+    let rows = rows.into_iter().map(|row| table_row(row, now));
     let failures: Vec<String> = app
         .host_failures()
         .iter()
@@ -50,8 +60,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, by_t
     let failure_height = u16::try_from(failures.len()).unwrap_or(u16::MAX);
     let [table_area, failure_area] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(failure_height)]).areas(area);
-    let table = Table::new(rows, COLUMN_WIDTHS).header(Row::new(HEADER));
-    frame.render_widget(table, table_area);
+    let table = Table::new(rows, COLUMN_WIDTHS)
+        .header(Row::new(HEADER))
+        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+    let mut state = TableState::default().with_selected(selected);
+    frame.render_stateful_widget(table, table_area, &mut state);
     frame.render_widget(Paragraph::new(failures.join("\n")), failure_area);
 }
 
