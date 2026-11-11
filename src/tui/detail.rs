@@ -42,9 +42,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
             DetailTab::Checks => with_partial_note(detail, check_lines(&detail.check_runs)),
         },
     };
+    let on_files = app.tab == DetailTab::Files;
+    let files_offset = on_files.then(|| files_scroll(app, &lines, area));
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let scroll = if app.tab == DetailTab::Files {
-        files_scroll(app, area)
+    let scroll = if let Some(offset) = files_offset {
+        offset
     } else {
         let rows = paragraph.line_count(area.width);
         app.set_detail_scroll_max(rows.saturating_sub(usize::from(area.height)));
@@ -53,14 +55,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
     frame.render_widget(paragraph.scroll((scroll, 0)), area);
 }
 
-/// How far the Files tab scrolls so the selected file stays in view.
-fn files_scroll(app: &App, area: Rect) -> u16 {
-    if app.tab != DetailTab::Files {
-        return 0;
-    }
-    let hidden = app
-        .file_cursor()
-        .saturating_sub(usize::from(area.height).saturating_sub(1));
+/// How far the Files tab scrolls so the last row of the selected file stays in view, counting
+/// the rows a long path wraps onto.
+fn files_scroll(app: &App, lines: &[Line<'static>], area: Rect) -> u16 {
+    let selected = app.file_cursor();
+    let through_selected: Vec<Line<'static>> = lines.iter().take(selected + 1).cloned().collect();
+    let rows = Paragraph::new(through_selected)
+        .wrap(Wrap { trim: false })
+        .line_count(area.width);
+    let hidden = rows.saturating_sub(usize::from(area.height));
     u16::try_from(hidden).unwrap_or(u16::MAX)
 }
 

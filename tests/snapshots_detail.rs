@@ -465,3 +465,37 @@ fn leaving_a_tab_resets_its_scroll() {
     // Assert: the commits start at the top again
     assert!(render_detail(&app).contains("commit number 0 "));
 }
+
+#[test]
+fn a_selected_file_with_a_long_wrapped_path_stays_on_screen() {
+    // Arrange: ten files whose paths each wrap onto two rows of a 40 by 10 area
+    let nodes: Vec<serde_json::Value> = (0..10)
+        .map(|index| {
+            serde_json::json!({
+                "filename": format!("dir/{index}/{}", "x".repeat(50)),
+                "previous_filename": null,
+                "status": "modified",
+                "changes": 1,
+                "blob_url": "https://github.com/o/r/blob/a/f",
+                "patch": "@@ -1 +1 @@\n-a\n+b"
+            })
+        })
+        .collect();
+    let files = map_files(&serde_json::Value::Array(nodes).to_string()).expect("map files");
+    let mut app = open_detail(DetailTab::Files);
+    app.apply_files(&key(), files);
+    app.screen = Screen::Detail;
+    for _ in 0..9 {
+        press(&mut app, KeyCode::Char('j'), KeyModifiers::NONE);
+    }
+
+    // Act
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("test terminal");
+    terminal
+        .draw(|frame| detail::render(frame, frame.area(), &app, &FixedClock))
+        .expect("draw");
+    let screen = buffer_text(terminal.backend().buffer());
+
+    // Assert: the last file, selected, is on screen
+    assert!(screen.contains("dir/9/"), "selected file off screen:\n{screen}");
+}
