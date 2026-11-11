@@ -442,7 +442,10 @@ fn commits_past_the_screen_are_reachable_by_scrolling() {
     let last = render_detail(&app);
 
     // Assert: the last commit shows and the first has scrolled away
-    assert!(last.contains("commit number 149 "), "tail unreachable:\n{last}");
+    assert!(
+        last.contains("commit number 149 "),
+        "tail unreachable:\n{last}"
+    );
     assert!(!last.contains("commit number 0 "), "{last}");
 
     // Act: one line back up, then back to the top
@@ -497,5 +500,8 @@ fn a_selected_file_with_a_long_wrapped_path_stays_on_screen() {
     let screen = buffer_text(terminal.backend().buffer());
 
     // Assert: the last file, selected, is on screen
-    assert!(screen.contains("dir/9/"), "selected file off screen:\n{screen}");
+    assert!(
+        screen.contains("dir/9/"),
+        "selected file off screen:\n{screen}"
+    );
 }
