@@ -8,7 +8,9 @@ mod support;
 
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use helios::accounts::{Account, AccountState};
@@ -20,6 +22,7 @@ use helios::github::queries::{
 use helios::github::GithubApi;
 use helios::model::PrSummary;
 use helios::secret::Secret;
+use support::github::{planted_token, FixedToken};
 use support::server::{ScriptedResponse, TestServer};
 
 const HOST: &str = "github.test";
@@ -33,11 +36,26 @@ const NEXT_CURSOR: &str = "cursor-page-two";
 const OK: u16 = 200;
 const NOT_FOUND: u16 = 404;
 
-struct FixedToken;
+/// Hands out one token, counts the asks and notes which thread served the last one.
+struct WatchedToken {
+    fetches: AtomicUsize,
+    thread: Mutex<Option<ThreadId>>,
+}
 
-impl TokenSource for FixedToken {
+impl WatchedToken {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            fetches: AtomicUsize::new(0),
+            thread: Mutex::new(None),
+        })
+    }
+}
+
+impl TokenSource for WatchedToken {
     fn fetch(&self) -> Result<Secret, GithubError> {
-        Ok(Secret::new("planted".to_string()))
+        self.fetches.fetch_add(1, Ordering::SeqCst);
+        *self.thread.lock().expect("thread lock") = Some(std::thread::current().id());
+        Ok(Secret::new(planted_token()))
     }
 }
 
@@ -51,6 +69,10 @@ fn fixture(relative: &str) -> String {
 }
 
 fn octo(server: &TestServer) -> Octo {
+    octo_with(server, Arc::new(FixedToken(planted_token())))
+}
+
+fn octo_with(server: &TestServer, token: Arc<dyn TokenSource>) -> Octo {
     let account = Account {
         host: HOST.into(),
         login: LOGIN.into(),
@@ -58,13 +80,7 @@ fn octo(server: &TestServer) -> Octo {
         scopes: vec![],
         state: AccountState::Success,
     };
-    Octo::new(
-        &account,
-        &server.origin(),
-        REQUEST_TIMEOUT,
-        Arc::new(FixedToken),
-    )
-    .expect("build client")
+    Octo::new(&account, &server.origin(), REQUEST_TIMEOUT, token).expect("build client")
 }
 
 fn rows(json: &str) -> Vec<PrSummary> {
@@ -105,6 +121,46 @@ async fn octo_list_returns_mapped_pull_requests() {
     assert_eq!(server.requests().len(), 2, "follows the cursor to page two");
     assert!(server.requests()[0].path.ends_with("/graphql"));
     assert!(server.requests()[0].body.contains(ListKind::Mine.search()));
+}
+
+#[tokio::test]
+async fn octo_list_builds_one_client_for_every_page() {
+    // Arrange
+    let first = with_next_page(&fixture("list/synthetic-review.json"));
+    let second = fixture("list/synthetic-assigned.json");
+    let server = TestServer::start_with(move |request| {
+        let body = if request.body.contains(NEXT_CURSOR) {
+            &second
+        } else {
+            &first
+        };
+        ScriptedResponse::json(OK, body)
+    });
+    let token = WatchedToken::new();
+    let api = octo_with(&server, token.clone());
+
+    // Act
+    api.list(ListKind::Mine).await.expect("list");
+
+    // Assert
+    assert_eq!(server.requests().len(), 2, "the list has two pages");
+    assert_eq!(token.fetches.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn octo_fetches_the_token_off_the_async_thread() {
+    // Arrange
+    let body = fixture("list/synthetic-review.json");
+    let server = TestServer::start(ScriptedResponse::json(OK, &body));
+    let token = WatchedToken::new();
+    let api = octo_with(&server, token.clone());
+
+    // Act
+    api.list(ListKind::Mine).await.expect("list");
+
+    // Assert
+    let served_on = token.thread.lock().expect("thread lock").expect("fetched");
+    assert_ne!(served_on, std::thread::current().id());
 }
 
 #[tokio::test]
