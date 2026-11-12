@@ -9,8 +9,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::model::{
-    ChangedFile, CheckRun, CheckRunState, CheckState, Comment, CommitSummary, DiffGap, FileDiff,
-    PrDetail, PrKey, PrState, PrSummary, ReviewDecision, ReviewThread, Tag,
+    ChangedFile, CheckRun, CheckRunState, CheckState, Comment, CommitSummary, DetailCounts,
+    DiffGap, FileDiff, PrDetail, PrKey, PrState, PrSummary, ReviewDecision, ReviewThread, Shown,
+    Tag,
 };
 use crate::remote::Remote;
 use crate::sanitize::sanitize;
@@ -451,7 +452,7 @@ pub const DETAIL_QUERY: &str = r#"query($owner: String!, $repo: String!, $number
         totalCount
         nodes {
           isResolved path line
-          comments(first: 50) { nodes { author { login } body createdAt } }
+          comments(first: 50) { totalCount nodes { author { login } body createdAt } }
         }
       }
       commits(first: 100) {
@@ -519,9 +520,8 @@ struct Nodes<T> {
 }
 
 impl<T> Nodes<T> {
-    /// Whether GitHub reported more items than the page holds.
-    fn is_cut(&self) -> bool {
-        self.total_count > self.nodes.len()
+    fn shown(&self) -> Shown {
+        Shown::new(self.nodes.len(), self.total_count)
     }
 }
 
@@ -662,6 +662,7 @@ impl ThreadNode {
             path: sanitize(&self.path),
             line: self.line,
             is_resolved: self.is_resolved,
+            comment_count: self.comments.shown(),
             comments: into_comments(self.comments)?,
         })
     }
@@ -710,6 +711,19 @@ fn into_check_runs(nodes: Nodes<CheckRunsCommitNode>) -> Vec<CheckRun> {
         .collect()
 }
 
+/// The fetched and total status contexts of the latest commit.
+fn checks_shown(nodes: &Nodes<CheckRunsCommitNode>) -> Shown {
+    nodes
+        .nodes
+        .iter()
+        .filter_map(|node| node.commit.status_check_rollup.as_ref())
+        .map(|rollup| rollup.contexts.shown())
+        .fold(Shown::default(), |sum, part| Shown {
+            shown: sum.shown + part.shown,
+            total: sum.total + part.total,
+        })
+}
+
 fn reviewer_name(reviewer: Reviewer) -> Option<Remote> {
     reviewer.login.or(reviewer.name).map(|name| sanitize(&name))
 }
@@ -718,17 +732,14 @@ fn reviewer_name(reviewer: Reviewer) -> Option<Remote> {
 pub fn map_detail(json: &str) -> Result<PrDetail, DetailError> {
     let response: DetailResponse = serde_json::from_str(json).map_err(|_| DetailError::Parse)?;
     let pr = response.data.repository.pull_request;
-    let partial = pr.comments.is_cut()
-        || pr.review_threads.is_cut()
-        || pr.commits.is_cut()
-        || pr.check_runs.nodes.iter().any(|node| {
-            node.commit
-                .status_check_rollup
-                .as_ref()
-                .is_some_and(|rollup| rollup.contexts.is_cut())
-        });
+    let counts = DetailCounts {
+        comments: pr.comments.shown(),
+        threads: pr.review_threads.shown(),
+        commits: pr.commits.shown(),
+        checks: checks_shown(&pr.check_runs),
+    };
     Ok(PrDetail {
-        partial,
+        counts,
         title: sanitize(&pr.title),
         body: sanitize(&pr.body),
         state: pr_state(&pr.state),
