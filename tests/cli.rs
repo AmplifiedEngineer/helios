@@ -8,11 +8,15 @@ use std::time::Duration;
 
 use helios::app::refresh::REFRESH_INTERVAL;
 use helios::cli::{self, Config, REFRESH_SECS_MAX, REFRESH_SECS_MIN};
+use helios::github::clients::build_clients;
 use helios::tui::keys::BINDINGS;
 
 #[path = "support/fake_gh.rs"]
 mod fake_gh;
 use fake_gh::FakeGh;
+#[path = "support/github.rs"]
+mod github;
+use github::planted_token;
 
 const REFRESH_FLAG: &str = "--refresh-secs";
 const HOSTS_FLAG: &str = "--hosts";
@@ -161,14 +165,63 @@ fn the_debug_hooks_come_from_the_environment() {
     let unhooked = env(&[]);
 
     // Act
-    let with_hooks = cli::parse(&[], &hooked).expect("hooks parse");
-    let without_hooks = cli::parse(&[], &unhooked).expect("defaults parse");
+    let with_hooks = cli::debug_hooks(&hooked);
+    let without_hooks = cli::debug_hooks(&unhooked);
 
     // Assert
     assert!(with_hooks.panic_during_draw);
     assert!(with_hooks.fake_accounts);
     assert!(!without_hooks.panic_during_draw);
     assert!(!without_hooks.fake_accounts);
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn the_debug_hooks_are_off_in_a_release_build() {
+    // Arrange
+    let hooked = env(&[(TEST_PANIC_ENV, "1"), (FAKE_ACCOUNTS_ENV, "1")]);
+
+    // Act
+    let hooks = cli::debug_hooks(&hooked);
+
+    // Assert
+    assert!(!hooks.panic_during_draw);
+    assert!(!hooks.fake_accounts);
+}
+
+#[test]
+fn config_has_the_same_fields_in_every_build() {
+    // Arrange
+    let expected = Config {
+        hosts: Vec::new(),
+        refresh_secs: REFRESH_SECS_MIN,
+        drafts: false,
+        smoke: false,
+        version: None,
+        help: false,
+        gh_program: PathBuf::from("gh"),
+    };
+
+    // Act
+    let parsed = cli::parse(
+        &args(&[REFRESH_FLAG, &REFRESH_SECS_MIN.to_string()]),
+        &env(&[]),
+    );
+
+    // Assert
+    assert_eq!(parsed, Ok(expected));
+}
+
+#[test]
+fn the_public_tui_api_holds_no_panic_switch() {
+    // Arrange
+    let tui_mod = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/mod.rs");
+
+    // Act
+    let text = fs::read_to_string(tui_mod).expect("tui/mod.rs reads");
+
+    // Assert
+    assert!(!text.contains("panic!"), "tui/mod.rs holds a panic switch");
 }
 
 #[test]
@@ -208,13 +261,6 @@ const KNOWN_FLAGS: [&str; 6] = [
 ];
 const NO_ACCOUNTS_JSON: &str = r#"echo '{"hosts":{}}'"#;
 const NO_ACCOUNTS_MESSAGE: &str = "no accounts found";
-const TOKEN_PREFIX: &str = "ghp";
-const TOKEN_BODY: &str = "PlantedTokenForTheLeakCheck0123456789";
-
-/// Built at runtime so no token-shaped literal sits in the source.
-fn planted_token() -> String {
-    format!("{TOKEN_PREFIX}_{TOKEN_BODY}")
-}
 const GH_FAILURE_MESSAGE: &str = "running gh failed";
 const FAILURE_EXIT_CODE: i32 = 1;
 
@@ -363,4 +409,84 @@ fn an_empty_host_list_includes_every_host_and_a_set_list_only_its_hosts() {
 
     // Assert
     assert_eq!(results, [true, false, true]);
+}
+
+const TWO_HOSTS_JSON: &str = r#"echo '{"hosts":{
+    "github.com":[{"state":"success","active":true,"host":"github.com","login":"octo"}],
+    "ghe.example.com":[
+        {"state":"success","active":true,"host":"ghe.example.com","login":"hub"},
+        {"state":"success","active":false,"host":"ghe.example.com","login":"bot"}
+    ]}}'"#;
+const SHORT_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn client_names(gh: &Path, config: &Config) -> Vec<(String, String)> {
+    build_clients(gh, SHORT_TIMEOUT, |host| config.includes_host(host))
+        .expect("clients build")
+        .into_iter()
+        .map(|client| (client.host, client.login))
+        .collect()
+}
+
+#[test]
+fn build_clients_makes_one_client_per_account_on_every_host_by_default() {
+    // Arrange
+    let gh = FakeGh::new(TWO_HOSTS_JSON);
+    let config = cli::parse(&args(&[]), &env(&[])).expect("defaults parse");
+
+    // Act
+    let names = client_names(&gh.path, &config);
+
+    // Assert
+    let expected = [
+        ("ghe.example.com", "hub"),
+        ("ghe.example.com", "bot"),
+        ("github.com", "octo"),
+    ];
+    let expected: Vec<(String, String)> = expected
+        .iter()
+        .map(|(host, login)| ((*host).to_string(), (*login).to_string()))
+        .collect();
+    assert_eq!(names, expected);
+}
+
+#[test]
+fn build_clients_keeps_only_the_hosts_given_with_the_hosts_flag() {
+    // Arrange
+    let gh = FakeGh::new(TWO_HOSTS_JSON);
+    let config = cli::parse(&args(&[HOSTS_FLAG, "github.com"]), &env(&[])).expect("flag parses");
+
+    // Act
+    let names = client_names(&gh.path, &config);
+
+    // Assert
+    assert_eq!(names, vec![("github.com".to_string(), "octo".to_string())]);
+}
+
+#[test]
+fn build_clients_reports_a_gh_failure_without_the_token() {
+    // Arrange
+    let token = planted_token();
+    let gh = FakeGh::new(&format!("echo '{token}'\necho '{token}' >&2\nexit 1"));
+
+    // Act
+    let result = build_clients(&gh.path, SHORT_TIMEOUT, |_| true);
+
+    // Assert
+    let message = result.err().map(|error| error.to_string());
+    let message = message.expect("a gh failure is an error");
+    assert!(message.contains(GH_FAILURE_MESSAGE), "message: {message}");
+    assert!(!message.contains(&token), "message: {message}");
+}
+
+#[test]
+fn main_leaves_client_building_to_the_library() {
+    // Arrange
+    let main_rs = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs");
+
+    // Act
+    let text = fs::read_to_string(main_rs).expect("main.rs reads");
+
+    // Assert
+    assert!(!text.contains("api_base"));
+    assert!(!text.contains("GhTokens"));
 }

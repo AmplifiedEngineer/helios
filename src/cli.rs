@@ -24,9 +24,7 @@ const HOSTS_ENV: &str = "HELIOS_HOSTS";
 const REFRESH_ENV: &str = "HELIOS_REFRESH_SECS";
 const GH_ENV: &str = "HELIOS_GH";
 const DEFAULT_GH_PROGRAM: &str = "gh";
-#[cfg(debug_assertions)]
 const TEST_PANIC_ENV: &str = "HELIOS_TEST_PANIC";
-#[cfg(debug_assertions)]
 const FAKE_ACCOUNTS_ENV: &str = "HELIOS_FAKE_ACCOUNTS";
 const HOST_SEPARATOR: char = ',';
 
@@ -41,10 +39,22 @@ pub struct Config {
     pub version: Option<&'static str>,
     pub help: bool,
     pub gh_program: PathBuf,
-    #[cfg(debug_assertions)]
+}
+
+/// Test switches read from the environment. Every field is false in a release build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DebugHooks {
     pub panic_during_draw: bool,
-    #[cfg(debug_assertions)]
     pub fake_accounts: bool,
+}
+
+/// Reads the test switches from `env`; a release build ignores them.
+pub fn debug_hooks(env: &HashMap<String, String>) -> DebugHooks {
+    let enabled = cfg!(debug_assertions);
+    DebugHooks {
+        panic_during_draw: enabled && env.get(TEST_PANIC_ENV).is_some_and(|value| value == "1"),
+        fake_accounts: enabled && env.contains_key(FAKE_ACCOUNTS_ENV),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -74,10 +84,6 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
         gh_program: env
             .get(GH_ENV)
             .map_or_else(|| PathBuf::from(DEFAULT_GH_PROGRAM), PathBuf::from),
-        #[cfg(debug_assertions)]
-        panic_during_draw: env.get(TEST_PANIC_ENV).is_some_and(|value| value == "1"),
-        #[cfg(debug_assertions)]
-        fake_accounts: env.contains_key(FAKE_ACCOUNTS_ENV),
     };
 
     let mut rest = args.iter();

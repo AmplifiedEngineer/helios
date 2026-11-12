@@ -8,6 +8,7 @@ use crate::model::PrDetail;
 use errors::GithubError;
 use queries::{FilesListing, ListKind, Listing};
 
+pub mod clients;
 pub mod errors;
 pub mod octo;
 pub mod queries;

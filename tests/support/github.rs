@@ -2,6 +2,9 @@
 
 //! Shared fixtures for the GitHub client tests.
 
+// A shared helper: each test binary uses only part of it.
+#![allow(dead_code)]
+
 use helios::accounts::{Account, AccountState};
 use helios::github::errors::GithubError;
 use helios::github::octo::TokenSource;
