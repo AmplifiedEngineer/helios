@@ -11,6 +11,9 @@ use std::time::{Duration, SystemTime};
 /// How long the list waits between automatic refreshes.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 
+/// Longest a rate-limit backoff may hold the refresh, whatever time the server names.
+pub const MAX_BACKOFF: Duration = Duration::from_secs(REFRESH_SECS_MAX);
+
 /// The source of the current time, so tests can move it without sleeping.
 pub trait Clock {
     fn now(&self) -> SystemTime;
@@ -86,6 +89,7 @@ impl<C: Clock> Scheduler<C> {
     }
 
     fn start_backoff(&mut self, until: SystemTime) {
+        let until = until.min(self.clock.now() + MAX_BACKOFF);
         self.next_due = until;
         self.backoff_until = Some(until);
     }
