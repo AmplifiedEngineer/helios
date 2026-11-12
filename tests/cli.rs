@@ -161,14 +161,63 @@ fn the_debug_hooks_come_from_the_environment() {
     let unhooked = env(&[]);
 
     // Act
-    let with_hooks = cli::parse(&[], &hooked).expect("hooks parse");
-    let without_hooks = cli::parse(&[], &unhooked).expect("defaults parse");
+    let with_hooks = cli::debug_hooks(&hooked);
+    let without_hooks = cli::debug_hooks(&unhooked);
 
     // Assert
     assert!(with_hooks.panic_during_draw);
     assert!(with_hooks.fake_accounts);
     assert!(!without_hooks.panic_during_draw);
     assert!(!without_hooks.fake_accounts);
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn the_debug_hooks_are_off_in_a_release_build() {
+    // Arrange
+    let hooked = env(&[(TEST_PANIC_ENV, "1"), (FAKE_ACCOUNTS_ENV, "1")]);
+
+    // Act
+    let hooks = cli::debug_hooks(&hooked);
+
+    // Assert
+    assert!(!hooks.panic_during_draw);
+    assert!(!hooks.fake_accounts);
+}
+
+#[test]
+fn config_has_the_same_fields_in_every_build() {
+    // Arrange
+    let expected = Config {
+        hosts: Vec::new(),
+        refresh_secs: REFRESH_SECS_MIN,
+        drafts: false,
+        smoke: false,
+        version: None,
+        help: false,
+        gh_program: PathBuf::from("gh"),
+    };
+
+    // Act
+    let parsed = cli::parse(
+        &args(&[REFRESH_FLAG, &REFRESH_SECS_MIN.to_string()]),
+        &env(&[]),
+    );
+
+    // Assert
+    assert_eq!(parsed, Ok(expected));
+}
+
+#[test]
+fn the_public_tui_api_holds_no_panic_switch() {
+    // Arrange
+    let tui_mod = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/mod.rs");
+
+    // Act
+    let text = fs::read_to_string(tui_mod).expect("tui/mod.rs reads");
+
+    // Assert
+    assert!(!text.contains("panic!"), "tui/mod.rs holds a panic switch");
 }
 
 #[test]

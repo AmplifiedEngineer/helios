@@ -20,7 +20,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::{Terminal, TerminalOptions, Viewport};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -67,18 +67,4 @@ pub fn install_panic_hook() {
         restore_terminal();
         previous(info);
     }));
-}
-
-/// Draws the first frame: the body area and the footer built from the key table.
-/// With `panic_during_draw` the draw panics, to exercise terminal restoration.
-pub fn draw_first_frame(terminal: &mut Tui, panic_during_draw: bool) -> io::Result<()> {
-    terminal.draw(|frame| {
-        if panic_during_draw {
-            panic!("panic requested during the first draw");
-        }
-        let [_body, footer] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
-        keys::render_footer(frame, footer);
-    })?;
-    Ok(())
 }
