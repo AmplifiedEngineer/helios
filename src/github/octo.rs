@@ -15,7 +15,7 @@ use crate::accounts::{self, Account};
 use crate::github::errors::GithubError;
 use crate::github::queries::{
     detail_variables, files_path, map_detail, map_files, map_page, query_variables, FilesListing,
-    ListKind, Listing, Pager, DETAIL_QUERY, FILES_PER_PAGE, LIST_QUERY,
+    ListKind, Listing, Pager, DETAIL_QUERY, FILES_PATH_TEMPLATE, FILES_PER_PAGE, LIST_QUERY,
 };
 use crate::github::GithubApi;
 use crate::model::PrDetail;
@@ -80,8 +80,6 @@ const GHES_REST_SUFFIX: &str = "/v3";
 pub const MAX_PAGES: usize = 30;
 /// Most changed files the Files tab loads.
 pub const MAX_FILES: usize = MAX_PAGES * FILES_PER_PAGE;
-/// Shape of the pull request files path built by `queries::files_path`.
-const FILES_PATH_TEMPLATE: &str = "/repos/{owner}/{repo}/pulls/{number}/files";
 /// Text the timeout layer's error carries.
 const TIMEOUT_MESSAGE: &str = "timed out";
 const STATUS_UNAUTHORIZED: u16 = 401;
@@ -179,18 +177,33 @@ impl Octo {
         query: &str,
         variables: &serde_json::Value,
     ) -> Result<GraphqlResponse, GithubError> {
-        match self.graphql_once(query, variables).await {
-            Err(GithubError::AuthRequired) => self.graphql_once(query, variables).await,
+        let mut client = self.graphql_client().await?;
+        self.graphql_on(&mut client, query, variables).await
+    }
+
+    /// Runs a GraphQL query on `client`. A 401 rebuilds the client with a fresh
+    /// token and retries once, so a caller can keep one client across calls.
+    async fn graphql_on(
+        &self,
+        client: &mut Octocrab,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<GraphqlResponse, GithubError> {
+        match self.graphql_once(client, query, variables).await {
+            Err(GithubError::AuthRequired) => {
+                *client = self.graphql_client().await?;
+                self.graphql_once(client, query, variables).await
+            }
             other => other,
         }
     }
 
     async fn graphql_once(
         &self,
+        client: &Octocrab,
         query: &str,
         variables: &serde_json::Value,
     ) -> Result<GraphqlResponse, GithubError> {
-        let client = self.graphql_client()?;
         let payload = serde_json::json!({ "query": query, "variables": variables });
         let response = client
             ._post(GRAPHQL_PATH, Some(&payload))
@@ -237,7 +250,7 @@ impl Octo {
         let mut items = Vec::new();
         let mut next = Some(path.to_string());
         let mut seen = HashSet::new();
-        let mut client = self.client()?;
+        let mut client = self.client().await?;
         while let Some(current) = next {
             if seen.len() >= MAX_PAGES {
                 return Ok((items, true));
@@ -247,7 +260,7 @@ impl Octo {
             }
             let (page, link) = match self.get_page_once(&client, &current).await {
                 Err(GithubError::AuthRequired) => {
-                    client = self.client()?;
+                    client = self.client().await?;
                     self.get_page_once(&client, &current).await?
                 }
                 other => other?,
@@ -284,21 +297,26 @@ impl Octo {
         Ok((items, link))
     }
 
-    fn client(&self) -> Result<Octocrab, GithubError> {
-        self.client_for(&self.base_uri)
+    async fn client(&self) -> Result<Octocrab, GithubError> {
+        self.client_for(&self.base_uri).await
     }
 
     /// The client for GraphQL, whose endpoint is `<host>/api/graphql` on GHES.
-    fn graphql_client(&self) -> Result<Octocrab, GithubError> {
+    async fn graphql_client(&self) -> Result<Octocrab, GithubError> {
         let base = self
             .base_uri
             .strip_suffix(GHES_REST_SUFFIX)
             .unwrap_or(&self.base_uri);
-        self.client_for(base)
+        self.client_for(base).await
     }
 
-    fn client_for(&self, base: &str) -> Result<Octocrab, GithubError> {
-        let token = self.token_source.fetch()?;
+    /// Fetches the token on a blocking thread, since `gh` runs as a subprocess,
+    /// so a runtime worker never waits on it.
+    async fn client_for(&self, base: &str) -> Result<Octocrab, GithubError> {
+        let source = Arc::clone(&self.token_source);
+        let token = tokio::task::spawn_blocking(move || source.fetch())
+            .await
+            .map_err(|_| GithubError::AuthRequired)??;
         Octocrab::builder()
             .base_uri(base)
             .map_err(|_| GithubError::Network)?
@@ -315,10 +333,11 @@ impl Octo {
     /// The body text of a GraphQL answer that carries data.
     async fn graphql_body(
         &self,
+        client: &mut Octocrab,
         query: &str,
         variables: &serde_json::Value,
     ) -> Result<(String, Vec<GraphqlError>), GithubError> {
-        let response = self.graphql_with(query, variables).await?;
+        let response = self.graphql_on(client, query, variables).await?;
         let data = response.data.ok_or(GithubError::Decode)?;
         let messages: Vec<_> = response
             .errors
@@ -333,9 +352,12 @@ impl Octo {
 impl GithubApi for Octo {
     async fn list(&self, kind: ListKind) -> Result<Listing, GithubError> {
         let mut pager = Pager::default();
+        let mut client = self.graphql_client().await?;
         loop {
             let variables = query_variables(kind, pager.cursor());
-            let (body, _) = self.graphql_body(LIST_QUERY, &variables).await?;
+            let (body, _) = self
+                .graphql_body(&mut client, LIST_QUERY, &variables)
+                .await?;
             let page = map_page(&self.host, &self.login, &body).map_err(|_| GithubError::Decode)?;
             if !pager.push(page) {
                 return Ok(pager.finish());
@@ -345,7 +367,10 @@ impl GithubApi for Octo {
 
     async fn detail(&self, owner: &str, repo: &str, number: u64) -> Result<PrDetail, GithubError> {
         let variables = detail_variables(owner, repo, number);
-        let (body, errors) = self.graphql_body(DETAIL_QUERY, &variables).await?;
+        let mut client = self.graphql_client().await?;
+        let (body, errors) = self
+            .graphql_body(&mut client, DETAIL_QUERY, &variables)
+            .await?;
         map_detail(&body).map_err(|_| classify_errors(&errors).unwrap_or(GithubError::Decode))
     }
 
