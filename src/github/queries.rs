@@ -379,9 +379,16 @@ const STATUS_RENAMED: &str = "renamed";
 const STATUS_ADDED: &str = "added";
 const STATUS_REMOVED: &str = "removed";
 
+/// Shape of the pull request files path; `files_path` fills it in.
+pub const FILES_PATH_TEMPLATE: &str = "/repos/{owner}/{repo}/pulls/{number}/files";
+
 /// The relative REST path of one page of a pull request's files.
 pub fn files_path(owner: &str, repo: &str, number: u64, page: usize) -> String {
-    format!("/repos/{owner}/{repo}/pulls/{number}/files?per_page={FILES_PER_PAGE}&page={page}")
+    let path = FILES_PATH_TEMPLATE
+        .replace("{owner}", owner)
+        .replace("{repo}", repo)
+        .replace("{number}", &number.to_string());
+    format!("{path}?per_page={FILES_PER_PAGE}&page={page}")
 }
 
 #[derive(Deserialize)]
