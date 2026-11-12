@@ -2,20 +2,18 @@
 
 #[allow(dead_code)]
 mod support;
+use support::clock::FixedClock;
 
-use chrono::{TimeZone, Utc};
-use helios::app::refresh::Clock;
 use helios::app::worker::Loaded;
 use helios::app::{App, ListFilter};
 use helios::github::errors::GithubError;
 use helios::github::queries::{map_page, merge_needs_me};
 use helios::model::{PrSummary, ReviewDecision};
 use helios::sanitize::sanitize;
-use helios::tui::{mine, needs_me};
+use helios::tui::{list, mine, needs_me};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::fs;
-use std::time::SystemTime;
 use support::render::buffer_text;
 use support::snapshot::assert_snapshot;
 
@@ -31,18 +29,6 @@ const SCREEN_HEIGHT: u16 = 24;
 const REVIEW_TITLES: [&str; 2] = ["Shared change", "Review only"];
 const ASSIGNED_TITLES: [&str; 3] = ["Assigned only", "No checks yet", "Ghost PR"];
 const DRAFT_TITLE: &str = "Draft work";
-
-/// A clock stopped two hours after the fixtures' `updatedAt`.
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> SystemTime {
-        Utc.with_ymd_and_hms(2026, 11, 5, 12, 0, 0)
-            .single()
-            .expect("a valid instant")
-            .into()
-    }
-}
 
 fn fixture_rows(path: &str) -> Vec<PrSummary> {
     let json = fs::read_to_string(path).expect("read the list fixture");
@@ -74,7 +60,14 @@ fn render_needs_me_at(app: &App, width: u16) -> String {
     let mut terminal =
         Terminal::new(TestBackend::new(width, SCREEN_HEIGHT)).expect("test terminal");
     terminal
-        .draw(|frame| needs_me::render(frame, frame.area(), app, &FixedClock))
+        .draw(|frame| {
+            needs_me::render(
+                frame,
+                frame.area(),
+                app,
+                &FixedClock::after_the_list_fixtures(),
+            )
+        })
         .expect("draw");
     buffer_text(terminal.backend().buffer())
 }
@@ -290,29 +283,85 @@ fn failed_host_shows_its_state_while_the_other_host_rows_stay() {
 }
 
 #[test]
-fn the_mine_view_ignores_the_tag_filter_and_shows_every_row() {
-    // Arrange: a Review filter would hide the assigned rows on the Needs me list
+fn the_mine_view_draws_the_mine_rows_and_ignores_the_tag_filter() {
+    // Arrange: the Needs me list holds every fixture row, the Mine list only the review rows,
+    // and an Assigned filter would hide the review rows on the Needs me list
     let mut app = needs_me_app();
+    let generation = app.begin_refresh();
+    let applied = app.apply_mine(Loaded {
+        generation,
+        partial: false,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Ok(fixture_rows(REVIEW_FIXTURE)),
+    });
+    assert!(applied, "the Mine rows were not applied");
     app.cycle_filter();
-    assert_eq!(app.filter, ListFilter::Review);
+    app.cycle_filter();
+    assert_eq!(app.filter, ListFilter::Assigned);
     let mut terminal =
         Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
 
     // Act
     terminal
-        .draw(|frame| mine::render(frame, frame.area(), &app, &FixedClock))
+        .draw(|frame| {
+            mine::render(
+                frame,
+                frame.area(),
+                &app,
+                &FixedClock::after_the_list_fixtures(),
+            )
+        })
         .expect("draw");
-    let screen: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let screen = buffer_text(terminal.backend().buffer());
 
     // Assert
     assert_shows(&screen, &REVIEW_TITLES);
-    assert_shows(&screen, &ASSIGNED_TITLES);
+    for title in ASSIGNED_TITLES {
+        assert!(
+            !screen.contains(title),
+            "the Mine view drew the Needs me row {title:?}:\n{screen}"
+        );
+    }
+}
+
+#[test]
+fn the_renderer_draws_every_row_it_is_given_and_the_app_filters_drafts() {
+    // Arrange: one draft row, with drafts hidden
+    let draft = fixture_rows(ASSIGNED_FIXTURE)
+        .into_iter()
+        .find(|row| row.is_draft)
+        .expect("the assigned fixture has a draft row");
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    app.apply(Loaded {
+        generation,
+        partial: false,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Ok(vec![draft.clone()]),
+    });
+    let mut terminal =
+        Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+
+    // Act
+    terminal
+        .draw(|frame| {
+            list::render_rows(
+                frame,
+                frame.area(),
+                &app,
+                vec![&draft],
+                &FixedClock::after_the_list_fixtures(),
+                None,
+            )
+        })
+        .expect("draw");
+    let drawn = buffer_text(terminal.backend().buffer());
+
+    // Assert: the app drops the draft, the renderer draws what it is given
+    assert!(app.list_rows().is_empty());
+    assert!(drawn.contains(DRAFT_TITLE), "{drawn}");
 }
 
 #[test]

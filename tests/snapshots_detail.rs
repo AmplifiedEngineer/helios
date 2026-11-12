@@ -2,7 +2,6 @@
 
 use chrono::{TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use helios::app::refresh::Clock;
 use helios::app::{App, DetailState, DetailTab, LoadRequest, Screen};
 use helios::github::errors::GithubError;
 use helios::github::octo::MAX_FILES;
@@ -13,10 +12,10 @@ use helios::tui::keys::{handle_key, BINDINGS};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::fs;
-use std::time::SystemTime;
 
 #[allow(dead_code)]
 mod support;
+use support::clock::FixedClock;
 use support::render::{buffer_text, line_with};
 use support::snapshot::assert_snapshot;
 
@@ -38,19 +37,6 @@ const FIRST_REPLY_AUTHOR: &str = "copilot-pull-request-reviewer";
 const SECOND_REPLY_AUTHOR: &str = "BagToad";
 const SECOND_REPLY_BODY: &str = "gonna leave it";
 
-/// A clock stopped 2 hours after the issue comment, 9 days 21 hours after the
-/// second thread reply and 10 days 1 hour after the first.
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> SystemTime {
-        Utc.with_ymd_and_hms(2026, 11, 7, 20, 30, 46)
-            .single()
-            .expect("a valid instant")
-            .into()
-    }
-}
-
 fn open_detail(tab: DetailTab) -> App {
     let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
     let detail = map_detail(&json).expect("map the detail fixture");
@@ -71,7 +57,14 @@ fn render_detail(app: &App) -> String {
     let mut terminal =
         Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
     terminal
-        .draw(|frame| detail::render(frame, frame.area(), app, &FixedClock))
+        .draw(|frame| {
+            detail::render(
+                frame,
+                frame.area(),
+                app,
+                &FixedClock::at(2026, 11, 7, 20, 30, 46),
+            )
+        })
         .expect("draw");
     buffer_text(terminal.backend().buffer())
 }
@@ -496,7 +489,14 @@ fn a_selected_file_with_a_long_wrapped_path_stays_on_screen() {
     // Act
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).expect("test terminal");
     terminal
-        .draw(|frame| detail::render(frame, frame.area(), &app, &FixedClock))
+        .draw(|frame| {
+            detail::render(
+                frame,
+                frame.area(),
+                &app,
+                &FixedClock::at(2026, 11, 7, 20, 30, 46),
+            )
+        })
         .expect("draw");
     let screen = buffer_text(terminal.backend().buffer());
 

@@ -2,7 +2,7 @@
 
 use chrono::{TimeZone, Utc};
 use helios::app::worker::{channel, Loaded};
-use helios::app::{App, DetailState, LoadRequest};
+use helios::app::{App, DetailState, LoadRequest, Step};
 use helios::github::errors::GithubError;
 use helios::model::{PrKey, PrSummary};
 use helios::sanitize::sanitize;
@@ -67,6 +67,7 @@ fn key(number: u64) -> PrKey {
 
 fn app_with_rows(numbers: &[u64]) -> App {
     let mut app = App::new();
+    app.toggle_view();
     let generation = app.begin_refresh();
     app.apply(loaded(generation, numbers));
     app
@@ -357,4 +358,48 @@ fn a_cut_list_marks_its_account_partial_until_a_whole_one_replaces_it() {
     // Assert
     assert!(after_cut, "a cut list left no marker");
     assert!(!app.has_partial_list(), "a whole list kept the marker");
+}
+
+fn app_in_mine_view(numbers: &[u64]) -> App {
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    app.apply_mine(loaded(generation, numbers));
+    app
+}
+
+#[test]
+fn the_cursor_follows_the_mine_list_in_the_mine_view() {
+    // Arrange / Act
+    let app = app_in_mine_view(&[10, 11]);
+
+    // Assert
+    assert_eq!(app.cursor(), Some(&key(10)));
+}
+
+#[test]
+fn a_needs_me_refresh_leaves_the_mine_cursor_alone() {
+    // Arrange
+    let mut app = app_in_mine_view(&[10, 11, 12]);
+    app.move_cursor(Step::Last);
+
+    // Act
+    let generation = app.begin_refresh();
+    app.apply(loaded(generation, &[1, 2]));
+
+    // Assert
+    assert_eq!(app.cursor(), Some(&key(12)));
+}
+
+#[test]
+fn the_mine_cursor_stays_on_the_same_pr_when_a_refresh_reorders_rows() {
+    // Arrange
+    let mut app = app_in_mine_view(&[10, 11, 12]);
+    app.select(key(11));
+    let generation = app.begin_refresh();
+
+    // Act
+    app.apply_mine(loaded(generation, &[12, 10, 11]));
+
+    // Assert
+    assert_eq!(app.cursor(), Some(&key(11)));
 }

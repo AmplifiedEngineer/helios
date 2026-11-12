@@ -32,19 +32,26 @@ impl App {
     /// The rows of the list the screen shows, drafts and filter applied.
     pub fn list_rows(&self) -> Vec<&PrSummary> {
         match self.view {
-            ListView::Mine => self
-                .mine_rows
-                .iter()
-                .filter(|row| row.is_visible(self.show_drafts))
-                .collect(),
+            ListView::Mine => self.visible_mine_rows(),
             ListView::NeedsMe => self.visible_rows(true),
+        }
+    }
+
+    /// The cursor of the list the screen shows.
+    pub(super) fn cursor_slot(&mut self) -> &mut usize {
+        match self.view {
+            ListView::Mine => &mut self.mine_cursor,
+            ListView::NeedsMe => &mut self.needs_me_cursor,
         }
     }
 
     /// The row index the cursor is on, kept inside the list.
     pub fn list_cursor(&self) -> usize {
-        self.list_cursor
-            .min(self.list_rows().len().saturating_sub(1))
+        let cursor = match self.view {
+            ListView::Mine => self.mine_cursor,
+            ListView::NeedsMe => self.needs_me_cursor,
+        };
+        cursor.min(self.list_rows().len().saturating_sub(1))
     }
 
     /// The row the list cursor is on.
@@ -62,13 +69,14 @@ impl App {
     }
 
     pub fn move_cursor(&mut self, step: Step) {
-        self.list_cursor = step.land(self.list_cursor(), self.list_rows().len());
+        let landed = step.land(self.list_cursor(), self.list_rows().len());
+        *self.cursor_slot() = landed;
     }
 
     /// Switches between the Mine and Needs me lists, with the cursor on the first row.
     pub fn toggle_view(&mut self) {
         self.view = self.view.other();
-        self.list_cursor = 0;
+        *self.cursor_slot() = 0;
     }
 
     /// Runs `change`, then puts the list cursor back on the row it was on, when that row remains.
@@ -77,7 +85,7 @@ impl App {
         change(self);
         let index = before.and_then(|key| self.list_rows().iter().position(|row| row.key == key));
         if let Some(index) = index {
-            self.list_cursor = index;
+            *self.cursor_slot() = index;
         }
     }
 
