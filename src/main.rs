@@ -6,11 +6,11 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use helios::accounts;
 use helios::app::loader::{Loader, Source};
 use helios::app::App;
 use helios::cli::{self, Config, DebugHooks};
-use helios::github::octo::{api_base, GhTokens, Octo, REQUEST_TIMEOUT};
+use helios::github::clients::{build_clients, Client, ClientsError};
+use helios::github::octo::{Octo, REQUEST_TIMEOUT};
 use helios::smoke::{self, SmokeAccount};
 use helios::tui::run::{Session, TerminalEvents};
 use helios::tui::{self, SystemClock};
@@ -18,38 +18,11 @@ use helios::tui::{self, SystemClock};
 const PANIC_DURING_DRAW_MESSAGE: &str = "panic requested during the first draw";
 const ACCOUNTS_FAILED_PREFIX: &str = "Could not read the gh accounts: ";
 
-/// One `gh` account and the client for its host.
-struct Client {
-    host: String,
-    login: String,
-    api: Octo,
-}
-
 /// A client for every account `gh` knows on a host the config includes.
-fn build_clients(config: &Config) -> Result<Vec<Client>, String> {
-    let found = accounts::list(&config.gh_program, REQUEST_TIMEOUT).map_err(|e| e.to_string())?;
-    let mut clients = Vec::new();
-    for account in found.iter().filter(|a| config.includes_host(&a.host)) {
-        let tokens = GhTokens {
-            program: config.gh_program.clone(),
-            host: account.host.clone(),
-            login: account.login.clone(),
-            timeout: REQUEST_TIMEOUT,
-        };
-        let api = Octo::new(
-            account,
-            &api_base(&account.host),
-            REQUEST_TIMEOUT,
-            Arc::new(tokens),
-        )
-        .map_err(|e| e.to_string())?;
-        clients.push(Client {
-            host: account.host.clone(),
-            login: account.login.clone(),
-            api,
-        });
-    }
-    Ok(clients)
+fn clients(config: &Config) -> Result<Vec<Client>, ClientsError> {
+    build_clients(&config.gh_program, REQUEST_TIMEOUT, |host| {
+        config.includes_host(host)
+    })
 }
 
 fn run(config: &Config, hooks: DebugHooks) -> io::Result<()> {
@@ -60,8 +33,8 @@ fn run(config: &Config, hooks: DebugHooks) -> io::Result<()> {
     let clients = if hooks.fake_accounts {
         Vec::new()
     } else {
-        build_clients(config).unwrap_or_else(|message| {
-            app.set_notice(format!("{ACCOUNTS_FAILED_PREFIX}{message}"));
+        clients(config).unwrap_or_else(|error| {
+            app.set_notice(format!("{ACCOUNTS_FAILED_PREFIX}{error}"));
             Vec::new()
         })
     };
@@ -86,7 +59,8 @@ fn run(config: &Config, hooks: DebugHooks) -> io::Result<()> {
 }
 
 fn smoke_run(config: &Config) -> Result<smoke::Outcome, String> {
-    let entries: Vec<SmokeAccount<Octo>> = build_clients(config)?
+    let entries: Vec<SmokeAccount<Octo>> = clients(config)
+        .map_err(|e| e.to_string())?
         .into_iter()
         .map(|client| SmokeAccount {
             host: client.host,
