@@ -11,5 +11,5 @@ use crate::tui::list;
 
 /// Draws the Mine rows, with the updated column measured against `clock`.
 pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
-    list::render(frame, area, app, clock, false);
+    list::render_rows(frame, area, app, app.visible_mine_rows(), clock, None);
 }

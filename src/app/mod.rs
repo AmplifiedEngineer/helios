@@ -118,7 +118,9 @@ pub struct App {
     detail_scroll: usize,
     /// The furthest the open tab can scroll; the detail view records it each draw.
     detail_scroll_max: Cell<usize>,
-    list_cursor: usize,
+    /// The cursor of each list, so a view keeps its own selection.
+    mine_cursor: usize,
+    needs_me_cursor: usize,
     mine_rows: Vec<PrSummary>,
     account_count: usize,
     answered: usize,
@@ -127,7 +129,6 @@ pub struct App {
     spinner_frame: usize,
     requests: Vec<LoadRequest>,
     generation: u64,
-    cursor: usize,
     rows: Vec<PrSummary>,
     host_failures: BTreeMap<AccountKey, GithubError>,
     partial_accounts: BTreeSet<AccountKey>,
@@ -187,14 +188,23 @@ impl App {
         &self.rows
     }
 
-    /// The rows the list shows: drafts only when on, and with `by_tag` only the rows the
-    /// filter selects.
+    /// The Needs me rows the list shows: drafts only when on, and with `by_tag` only the rows
+    /// the filter selects.
     pub fn visible_rows(&self, by_tag: bool) -> Vec<&PrSummary> {
-        self.rows
-            .iter()
-            .filter(|row| row.is_visible(self.show_drafts))
+        self.shown(&self.rows)
             .filter(|row| !by_tag || self.filter.matches(row))
             .collect()
+    }
+
+    /// The Mine rows the list shows: drafts only when on. The tag filter does not apply.
+    pub fn visible_mine_rows(&self) -> Vec<&PrSummary> {
+        self.shown(&self.mine_rows).collect()
+    }
+
+    /// The only place the app drops draft rows; the renderer draws what it is given.
+    fn shown<'a>(&self, rows: &'a [PrSummary]) -> impl Iterator<Item = &'a PrSummary> {
+        let show_drafts = self.show_drafts;
+        rows.iter().filter(move |row| row.is_visible(show_drafts))
     }
 
     /// The accounts whose latest load failed, by host and login.
@@ -262,16 +272,16 @@ impl App {
 
     pub fn select(&mut self, key: PrKey) {
         if let Some(index) = self.index_of(&key) {
-            self.cursor = index;
+            *self.cursor_slot() = index;
         }
         self.selected = Some(key);
         self.detail = DetailState::Loading;
         self.reset_files();
     }
 
-    /// The key of the row the cursor is on.
+    /// The key of the row the cursor is on, in the list the screen shows.
     pub fn cursor(&self) -> Option<&PrKey> {
-        self.rows.get(self.cursor).map(|row| &row.key)
+        self.highlighted().map(|row| &row.key)
     }
 
     pub fn detail(&self) -> &DetailState {
@@ -290,17 +300,19 @@ impl App {
     }
 
     fn index_of(&self, key: &PrKey) -> Option<usize> {
-        self.rows.iter().position(|row| &row.key == key)
+        self.list_rows().iter().position(|row| &row.key == key)
     }
 
     /// Puts the cursor back on the selected PR, or on the nearest row when it is gone.
     fn restore_cursor(&mut self) {
         let found = self.selected.as_ref().and_then(|key| self.index_of(key));
         if let Some(index) = found {
-            self.cursor = index;
+            *self.cursor_slot() = index;
             return;
         }
-        self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
+        let last = self.list_rows().len().saturating_sub(1);
+        let slot = self.cursor_slot();
+        *slot = (*slot).min(last);
         match self.cursor().cloned() {
             Some(key) => self.select(key),
             None => self.clear_selection(),
@@ -336,7 +348,7 @@ impl App {
                 app.rows
                     .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
                 app.rows.extend(rows);
-                if app.screen == Screen::List {
+                if app.screen == Screen::List && app.view == ListView::NeedsMe {
                     app.restore_cursor();
                 }
             }
@@ -358,6 +370,9 @@ impl App {
                 app.mine_rows
                     .retain(|row| row.key.host != loaded.host || row.key.account != loaded.account);
                 app.mine_rows.extend(rows);
+                if app.screen == Screen::List && app.view == ListView::Mine {
+                    app.restore_cursor();
+                }
             }
             Err(error) => app.record_failure(loaded.host, loaded.account, error),
         });

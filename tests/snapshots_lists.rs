@@ -11,7 +11,7 @@ use helios::github::errors::GithubError;
 use helios::github::queries::{map_page, merge_needs_me};
 use helios::model::{PrSummary, ReviewDecision};
 use helios::sanitize::sanitize;
-use helios::tui::{mine, needs_me};
+use helios::tui::{list, mine, needs_me};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::fs;
@@ -290,11 +290,22 @@ fn failed_host_shows_its_state_while_the_other_host_rows_stay() {
 }
 
 #[test]
-fn the_mine_view_ignores_the_tag_filter_and_shows_every_row() {
-    // Arrange: a Review filter would hide the assigned rows on the Needs me list
+fn the_mine_view_draws_the_mine_rows_and_ignores_the_tag_filter() {
+    // Arrange: the Needs me list holds every fixture row, the Mine list only the review rows,
+    // and an Assigned filter would hide the review rows on the Needs me list
     let mut app = needs_me_app();
+    let generation = app.begin_refresh();
+    let applied = app.apply_mine(Loaded {
+        generation,
+        partial: false,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Ok(fixture_rows(REVIEW_FIXTURE)),
+    });
+    assert!(applied, "the Mine rows were not applied");
     app.cycle_filter();
-    assert_eq!(app.filter, ListFilter::Review);
+    app.cycle_filter();
+    assert_eq!(app.filter, ListFilter::Assigned);
     let mut terminal =
         Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
 
@@ -302,17 +313,46 @@ fn the_mine_view_ignores_the_tag_filter_and_shows_every_row() {
     terminal
         .draw(|frame| mine::render(frame, frame.area(), &app, &FixedClock))
         .expect("draw");
-    let screen: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let screen = buffer_text(terminal.backend().buffer());
 
     // Assert
     assert_shows(&screen, &REVIEW_TITLES);
-    assert_shows(&screen, &ASSIGNED_TITLES);
+    for title in ASSIGNED_TITLES {
+        assert!(
+            !screen.contains(title),
+            "the Mine view drew the Needs me row {title:?}:\n{screen}"
+        );
+    }
+}
+
+#[test]
+fn the_renderer_draws_every_row_it_is_given_and_the_app_filters_drafts() {
+    // Arrange: one draft row, with drafts hidden
+    let draft = fixture_rows(ASSIGNED_FIXTURE)
+        .into_iter()
+        .find(|row| row.is_draft)
+        .expect("the assigned fixture has a draft row");
+    let mut app = App::new();
+    let generation = app.begin_refresh();
+    app.apply(Loaded {
+        generation,
+        partial: false,
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        result: Ok(vec![draft.clone()]),
+    });
+    let mut terminal =
+        Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+
+    // Act
+    terminal
+        .draw(|frame| list::render_rows(frame, frame.area(), &app, vec![&draft], &FixedClock, None))
+        .expect("draw");
+    let drawn = buffer_text(terminal.backend().buffer());
+
+    // Assert: the app drops the draft, the renderer draws what it is given
+    assert!(app.list_rows().is_empty());
+    assert!(drawn.contains(DRAFT_TITLE), "{drawn}");
 }
 
 #[test]

@@ -164,11 +164,6 @@ const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 3_600;
 const SECONDS_PER_DAY: u64 = 86_400;
 
-/// Draws the rows that pass the draft toggle, and the tag filter when `by_tag` is set.
-pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, by_tag: bool) {
-    render_rows(frame, area, app, app.visible_rows(by_tag), clock, None);
-}
-
 /// Draws `rows`, with the one at `selected` highlighted, and a line for each failed account.
 pub fn render_rows(
     frame: &mut Frame,
