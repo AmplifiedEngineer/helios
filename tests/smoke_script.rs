@@ -10,6 +10,9 @@ use std::process::{Command, Output, Stdio};
 #[path = "support/fake_gh.rs"]
 mod fake_gh;
 use fake_gh::FakeGh;
+#[path = "support/github.rs"]
+mod github;
+use github::planted_token;
 
 const GH_ENV: &str = "HELIOS_GH";
 const BIN_ENV: &str = "HELIOS_BIN";
@@ -18,13 +21,6 @@ const NO_ACCOUNTS_JSON: &str = r#"echo '{"hosts":{}}'"#;
 const NO_ACCOUNTS_MESSAGE: &str = "no accounts found";
 const GH_MISSING_MESSAGE: &str = "gh not found";
 const GH_FAILURE_MESSAGE: &str = "running gh failed";
-const TOKEN_PREFIX: &str = "ghp";
-const TOKEN_BODY: &str = "PlantedTokenForTheLeakCheck0123456789";
-
-/// Built at runtime so no token-shaped literal sits in the source.
-fn planted_token() -> String {
-    format!("{TOKEN_PREFIX}_{TOKEN_BODY}")
-}
 const FAILURE_EXIT_CODE: i32 = 1;
 
 fn script() -> PathBuf {

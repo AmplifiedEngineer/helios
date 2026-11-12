@@ -14,6 +14,9 @@ use helios::tui::keys::BINDINGS;
 #[path = "support/fake_gh.rs"]
 mod fake_gh;
 use fake_gh::FakeGh;
+#[path = "support/github.rs"]
+mod github;
+use github::planted_token;
 
 const REFRESH_FLAG: &str = "--refresh-secs";
 const HOSTS_FLAG: &str = "--hosts";
@@ -258,13 +261,6 @@ const KNOWN_FLAGS: [&str; 6] = [
 ];
 const NO_ACCOUNTS_JSON: &str = r#"echo '{"hosts":{}}'"#;
 const NO_ACCOUNTS_MESSAGE: &str = "no accounts found";
-const TOKEN_PREFIX: &str = "ghp";
-const TOKEN_BODY: &str = "PlantedTokenForTheLeakCheck0123456789";
-
-/// Built at runtime so no token-shaped literal sits in the source.
-fn planted_token() -> String {
-    format!("{TOKEN_PREFIX}_{TOKEN_BODY}")
-}
 const GH_FAILURE_MESSAGE: &str = "running gh failed";
 const FAILURE_EXIT_CODE: i32 = 1;
 
