@@ -19,6 +19,7 @@
         },
         "reviewDecision": "REVIEW_REQUIRED",
         "comments": {
+          "totalCount": 1,
           "nodes": [
             {
               "author": { "login": "talker" },
@@ -28,12 +29,14 @@
           ]
         },
         "reviewThreads": {
+          "totalCount": 2,
           "nodes": [
             {
               "isResolved": false,
               "path": "src/main.rs",
               "line": 7,
               "comments": {
+                "totalCount": 1,
                 "nodes": [
                   {
                     "author": { "login": "reviewer" },
@@ -47,11 +50,12 @@
               "isResolved": true,
               "path": "src/lib.rs",
               "line": null,
-              "comments": { "nodes": [] }
+              "comments": { "totalCount": 0, "nodes": [] }
             }
           ]
         },
         "commits": {
+          "totalCount": 1,
           "nodes": [
             {
               "commit": {
@@ -69,6 +73,7 @@
               "commit": {
                 "statusCheckRollup": {
                   "contexts": {
+                    "totalCount": 4,
                     "nodes": [
                       {
                         "__typename": "CheckRun",

@@ -2,7 +2,7 @@
 
 use helios::github::queries::{files_path, map_detail, map_files};
 use helios::model::{
-    ChangedFile, CheckRunState, DiffGap, FileDiff, PrDetail, PrState, ReviewDecision,
+    ChangedFile, CheckRunState, DiffGap, FileDiff, PrDetail, PrState, ReviewDecision, Shown,
 };
 use std::fs;
 use std::path::Path;
@@ -436,38 +436,86 @@ fn a_null_author_maps_to_the_ghost_login() {
     assert_eq!(author, "ghost");
 }
 
-fn recorded_with_total(connection: &str, total: u64) -> PrDetail {
-    let path =
+const CUT_TOTAL: u64 = 10_000;
+
+/// The recorded detail with `totalCount` replaced at the JSON pointer `pointer` inside the pull
+/// request.
+fn recorded_with_total(pointer: &str, total: u64) -> PrDetail {
+    let file =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/detail/recorded-public-pr.json");
     let mut json: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(path).expect("read fixture"))
+        serde_json::from_str(&fs::read_to_string(file).expect("read fixture"))
             .expect("fixture json");
-    json["data"]["repository"]["pullRequest"][connection]["totalCount"] = total.into();
+    let node = json["data"]["repository"]["pullRequest"]
+        .pointer_mut(pointer)
+        .expect("the connection is in the fixture");
+    node["totalCount"] = total.into();
     map_detail(&json.to_string()).expect("map detail")
 }
 
+fn whole(shown: usize) -> Shown {
+    Shown {
+        shown,
+        total: shown,
+    }
+}
+
+fn cut(shown: usize) -> Shown {
+    Shown {
+        shown,
+        total: CUT_TOTAL as usize,
+    }
+}
+
 #[test]
-fn a_connection_with_more_items_than_returned_marks_the_detail_partial() {
+fn a_whole_detail_reports_shown_equal_to_total_for_every_list() {
     // Arrange
-    let whole = recorded();
-    let total = 10_000;
+    let detail = recorded();
 
     // Act
-    let cut: Vec<(&str, bool)> = ["comments", "reviewThreads", "commits"]
-        .into_iter()
-        .map(|name| (name, recorded_with_total(name, total).partial))
-        .collect();
+    let counts = detail.counts;
 
     // Assert
-    assert!(!whole.partial, "a fixture without totals is not partial");
-    assert_eq!(
-        cut,
-        vec![
-            ("comments", true),
-            ("reviewThreads", true),
-            ("commits", true)
-        ]
-    );
+    assert_eq!(counts.comments, whole(1));
+    assert_eq!(counts.threads, whole(1));
+    assert_eq!(counts.commits, whole(3));
+    assert_eq!(counts.checks, whole(25));
+    assert_eq!(detail.threads[0].comment_count, whole(2));
+    assert!(!counts.comments.is_cut());
+}
+
+#[test]
+fn a_cut_list_reports_how_many_are_shown_of_the_total() {
+    // Arrange
+    let contexts = "/checkRuns/nodes/0/commit/statusCheckRollup/contexts";
+
+    // Act
+    let comments = recorded_with_total("/comments", CUT_TOTAL).counts.comments;
+    let thread_list = recorded_with_total("/reviewThreads", CUT_TOTAL)
+        .counts
+        .threads;
+    let commits = recorded_with_total("/commits", CUT_TOTAL).counts.commits;
+    let checks = recorded_with_total(contexts, CUT_TOTAL).counts.checks;
+
+    // Assert
+    assert_eq!(comments, cut(1));
+    assert_eq!(thread_list, cut(1));
+    assert_eq!(commits, cut(3));
+    assert_eq!(checks, cut(25));
+    assert!(comments.is_cut());
+}
+
+#[test]
+fn a_cut_thread_reports_its_own_comment_total() {
+    // Arrange
+    let pointer = "/reviewThreads/nodes/0/comments";
+
+    // Act
+    let detail = recorded_with_total(pointer, CUT_TOTAL);
+
+    // Assert
+    assert_eq!(detail.threads[0].comment_count, cut(2));
+    assert!(!detail.counts.threads.is_cut());
 }
 
 #[test]
@@ -480,8 +528,8 @@ fn the_detail_query_asks_for_the_totals() {
 
     // Assert
     assert!(
-        count >= 4,
-        "comments, threads, commits and checks need totals: {count}"
+        count >= 5,
+        "comments, threads, thread comments, commits and checks need totals: {count}"
     );
 }
 

@@ -365,15 +365,69 @@ fn opening_a_pull_request_shows_loading_and_requests_one_detail_load() {
     assert_eq!(app.requests(), [LoadRequest::Detail(other)]);
 }
 
-const PARTIAL_NOTE: &str = "Some items are not shown";
+const CUT_TOTAL: u64 = 240;
 
-#[test]
-fn a_partial_detail_says_so_on_the_list_tabs() {
-    // Arrange
+/// The recorded detail opened in an app, with `totalCount` set at the JSON pointer `pointer`.
+fn app_with_total(pointer: &str) -> App {
     let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
     let mut value: serde_json::Value = serde_json::from_str(&json).expect("fixture json");
-    value["data"]["repository"]["pullRequest"]["commits"]["totalCount"] = 10_000.into();
+    value["data"]["repository"]["pullRequest"]
+        .pointer_mut(pointer)
+        .expect("the connection is in the fixture")["totalCount"] = CUT_TOTAL.into();
     let detail = map_detail(&value.to_string()).expect("map the detail");
+    let key = PrKey {
+        host: HOST.into(),
+        account: ACCOUNT.into(),
+        repo: REPO.into(),
+        number: PR_NUMBER,
+    };
+    let mut app = App::new();
+    app.select(key.clone());
+    app.apply_detail(&key, Ok(detail));
+    app
+}
+
+#[test]
+fn a_cut_list_says_how_many_are_shown_of_the_total_on_its_tab() {
+    // Arrange
+    let contexts = "/checkRuns/nodes/0/commit/statusCheckRollup/contexts";
+    let cases = [
+        (
+            "/comments",
+            DetailTab::Conversation,
+            "showing 1 of 240 comments",
+        ),
+        (
+            "/reviewThreads",
+            DetailTab::Conversation,
+            "showing 1 of 240 review threads",
+        ),
+        (
+            "/reviewThreads/nodes/0/comments",
+            DetailTab::Conversation,
+            "showing 2 of 240 comments in this thread",
+        ),
+        ("/commits", DetailTab::Commits, "showing 3 of 240 commits"),
+        (contexts, DetailTab::Checks, "showing 25 of 240 checks"),
+    ];
+
+    for (pointer, tab, note) in cases {
+        let mut app = app_with_total(pointer);
+
+        // Act
+        app.tab = tab;
+        let screen = render_detail(&app);
+
+        // Assert
+        assert!(screen.contains(note), "{note}:\n{screen}");
+    }
+}
+
+#[test]
+fn a_whole_detail_shows_no_count_note_on_any_tab() {
+    // Arrange
+    let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
+    let detail = map_detail(&json).expect("map the detail");
     let key = PrKey {
         host: HOST.into(),
         account: ACCOUNT.into(),
@@ -385,6 +439,7 @@ fn a_partial_detail_says_so_on_the_list_tabs() {
     app.apply_detail(&key, Ok(detail));
 
     for tab in [
+        DetailTab::Overview,
         DetailTab::Conversation,
         DetailTab::Commits,
         DetailTab::Checks,
@@ -394,10 +449,8 @@ fn a_partial_detail_says_so_on_the_list_tabs() {
         let screen = render_detail(&app);
 
         // Assert
-        assert!(screen.contains(PARTIAL_NOTE), "{tab:?}:\n{screen}");
+        assert!(!screen.contains("showing "), "{tab:?}:\n{screen}");
     }
-    app.tab = DetailTab::Overview;
-    assert!(!render_detail(&app).contains(PARTIAL_NOTE));
 }
 
 /// A pull request with `count` invented commits, open on the Commits tab.

@@ -16,6 +16,7 @@
         },
         "reviewDecision": "APPROVED",
         "comments": {
+          "totalCount": 1,
           "nodes": [
             {
               "author": {
@@ -27,12 +28,14 @@
           ]
         },
         "reviewThreads": {
+          "totalCount": 1,
           "nodes": [
             {
               "isResolved": true,
               "path": "acceptance/testdata/repo/repo-delete-private-forks.txtar",
               "line": 15,
               "comments": {
+                "totalCount": 2,
                 "nodes": [
                   {
                     "author": {
@@ -54,6 +57,7 @@
           ]
         },
         "commits": {
+          "totalCount": 3,
           "nodes": [
             {
               "commit": {
@@ -102,6 +106,7 @@
               "commit": {
                 "statusCheckRollup": {
                   "contexts": {
+                    "totalCount": 25,
                     "nodes": [
                       {
                         "__typename": "CheckRun",

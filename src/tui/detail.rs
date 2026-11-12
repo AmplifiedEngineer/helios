@@ -13,7 +13,7 @@ use crate::app::{App, DetailState, DetailTab};
 use crate::github::octo::MAX_FILES;
 use crate::model::{
     ChangedFile, CheckRun, CheckRunState, Comment, CommitSummary, DiffGap, FileDiff, PrDetail,
-    PrState, ReviewDecision,
+    PrState, ReviewDecision, Shown,
 };
 use crate::tui::list::{age_since, failure_message};
 
@@ -21,7 +21,11 @@ const COMMENTS_HEADING: &str = "Issue comments";
 const THREADS_HEADING: &str = "Review threads";
 const REPLY_INDENT: &str = "  ";
 const LOADING_TEXT: &str = "Loading...";
-const PARTIAL_NOTE: &str = "Some items are not shown: GitHub has more than were fetched.";
+const COMMENTS_NOUN: &str = "comments";
+const THREADS_NOUN: &str = "review threads";
+const THREAD_COMMENTS_NOUN: &str = "comments in this thread";
+const COMMITS_NOUN: &str = "commits";
+const CHECKS_NOUN: &str = "checks";
 const FILES_CUT_NOTE_PREFIX: &str = "Showing the first";
 const FILES_CUT_NOTE_SUFFIX: &str = "files";
 const FILES_LOADING_TEXT: &str = "Loading files...";
@@ -39,10 +43,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
         DetailState::Failed(error) => vec![Line::from(failure_message(error))],
         DetailState::Loaded(detail) => match app.tab {
             DetailTab::Overview => overview_lines(detail),
-            DetailTab::Conversation => with_partial_note(detail, conversation_lines(detail, clock)),
-            DetailTab::Commits => with_partial_note(detail, commit_lines(&detail.commits, clock)),
+            DetailTab::Conversation => conversation_lines(detail, clock),
+            DetailTab::Commits => with_count_note(
+                detail.counts.commits,
+                COMMITS_NOUN,
+                commit_lines(&detail.commits, clock),
+            ),
             DetailTab::Files => file_lines(app),
-            DetailTab::Checks => with_partial_note(detail, check_lines(&detail.check_runs)),
+            DetailTab::Checks => with_count_note(
+                detail.counts.checks,
+                CHECKS_NOUN,
+                check_lines(&detail.check_runs),
+            ),
         },
     };
     let on_files = app.tab == DetailTab::Files;
@@ -75,9 +87,16 @@ fn files_scroll(app: &App, lines: &[Line<'static>], area: Rect) -> u16 {
     u16::try_from(hidden).unwrap_or(u16::MAX)
 }
 
-fn with_partial_note(detail: &PrDetail, mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
-    if detail.partial {
-        lines.insert(0, Line::from(PARTIAL_NOTE));
+/// The "showing N of M" line for a cut list, or nothing when the list is whole.
+fn count_note(count: Shown, noun: &str) -> Option<Line<'static>> {
+    count
+        .is_cut()
+        .then(|| Line::from(format!("showing {} of {} {noun}", count.shown, count.total)))
+}
+
+fn with_count_note(count: Shown, noun: &str, mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    if let Some(note) = count_note(count, noun) {
+        lines.insert(0, note);
     }
     lines
 }
@@ -201,15 +220,18 @@ fn check_state_text(state: &CheckRunState) -> String {
 /// Issue comments first, then the review threads, each under its own heading.
 fn conversation_lines(detail: &PrDetail, clock: &impl Clock) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(COMMENTS_HEADING)];
+    lines.extend(count_note(detail.counts.comments, COMMENTS_NOUN));
     for comment in &detail.comments {
         push_comment(&mut lines, comment, "", clock);
     }
     lines.push(Line::from(THREADS_HEADING));
+    lines.extend(count_note(detail.counts.threads, THREADS_NOUN));
     for thread in &detail.threads {
         lines.push(Line::from(thread.path.to_string()));
         for reply in &thread.comments {
             push_comment(&mut lines, reply, REPLY_INDENT, clock);
         }
+        lines.extend(count_note(thread.comment_count, THREAD_COMMENTS_NOUN));
     }
     lines
 }

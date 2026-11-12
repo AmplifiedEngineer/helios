@@ -8,7 +8,7 @@ use chrono::{TimeZone, Utc};
 use helios::app::worker::Loaded;
 use helios::app::{App, DetailTab, Step};
 use helios::github::errors::GithubError;
-use helios::model::{PrDetail, PrKey, PrState, PrSummary};
+use helios::model::{DetailCounts, PrDetail, PrKey, PrState, PrSummary};
 use helios::sanitize::sanitize;
 use helios::tui::draw_with;
 use ratatui::backend::TestBackend;
@@ -84,7 +84,7 @@ fn on_files() -> App {
             threads: Vec::new(),
             commits: Vec::new(),
             check_runs: Vec::new(),
-            partial: false,
+            counts: DetailCounts::default(),
         }),
     );
     app.apply_files(

@@ -20,7 +20,7 @@ use helios::app::App;
 use helios::github::errors::GithubError;
 use helios::github::queries::{FilesListing, ListKind, Listing};
 use helios::github::GithubApi;
-use helios::model::{PrDetail, PrKey, PrState, PrSummary, ReviewDecision};
+use helios::model::{DetailCounts, PrDetail, PrKey, PrState, PrSummary, ReviewDecision};
 use helios::sanitize::sanitize;
 use helios::tui::run::{EventSource, Flow, Session};
 use ratatui::backend::TestBackend;
@@ -141,7 +141,7 @@ impl GithubApi for FakeApi {
             threads: Vec::new(),
             commits: Vec::new(),
             check_runs: Vec::new(),
-            partial: false,
+            counts: DetailCounts::default(),
         })
     }
 

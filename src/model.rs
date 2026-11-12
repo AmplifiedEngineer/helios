@@ -143,6 +143,28 @@ pub struct Comment {
     pub created_at: DateTime<Utc>,
 }
 
+/// How many items of a list were fetched and how many GitHub holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Shown {
+    pub shown: usize,
+    pub total: usize,
+}
+
+impl Shown {
+    /// A total below the shown count, or a missing one, counts as the shown count.
+    pub fn new(shown: usize, total: usize) -> Self {
+        Self {
+            shown,
+            total: total.max(shown),
+        }
+    }
+
+    /// Whether GitHub holds more items than were fetched.
+    pub fn is_cut(&self) -> bool {
+        self.total > self.shown
+    }
+}
+
 /// A review thread anchored to a line of a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewThread {
@@ -151,6 +173,7 @@ pub struct ReviewThread {
     pub line: Option<u64>,
     pub is_resolved: bool,
     pub comments: Vec<Comment>,
+    pub comment_count: Shown,
 }
 
 /// One commit of a pull request.
@@ -187,6 +210,15 @@ pub struct CheckRun {
     pub url: Option<Remote>,
 }
 
+/// The fetched and total counts of each list in the detail view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DetailCounts {
+    pub comments: Shown,
+    pub threads: Shown,
+    pub commits: Shown,
+    pub checks: Shown,
+}
+
 /// Everything the detail view shows about one pull request. Text from GitHub is [`Remote`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrDetail {
@@ -202,6 +234,6 @@ pub struct PrDetail {
     pub threads: Vec<ReviewThread>,
     pub commits: Vec<CommitSummary>,
     pub check_runs: Vec<CheckRun>,
-    /// GitHub holds more comments, threads, commits or checks than were fetched.
-    pub partial: bool,
+    /// How many comments, threads, commits and checks were fetched of those GitHub holds.
+    pub counts: DetailCounts,
 }
