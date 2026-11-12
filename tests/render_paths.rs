@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use chrono::{TimeZone, Utc};
-use helios::app::refresh::Clock;
+#[allow(dead_code)]
+mod support;
 use helios::app::worker::Loaded;
 use helios::app::{App, DetailTab};
 use helios::github::queries::{map_detail, map_files, map_page, merge_needs_me};
@@ -10,7 +10,7 @@ use helios::tui::{detail, diff, needs_me};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use serde_json::{json, Value};
-use std::time::SystemTime;
+use support::clock::FixedClock;
 
 const ACCOUNT: &str = "octocat";
 const PR_NUMBER: u64 = 5;
@@ -38,18 +38,6 @@ const PREVIOUS_NAME: &str = "src/oldname.rs";
 const CHECK_NAME: &str = "checkname";
 const REMOVED_LINE: &str = "removedline";
 const ADDED_LINE: &str = "addedline";
-
-/// A clock stopped two hours after the fixtures' timestamps.
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> SystemTime {
-        Utc.with_ymd_and_hms(2026, 11, 5, 12, 0, 0)
-            .single()
-            .expect("a valid instant")
-            .into()
-    }
-}
 
 /// Wraps `visible` in a colour escape, an OSC title change, a bidi override, an isolate,
 /// a C1 control, DEL, a line separator and a second bidi mark.
@@ -279,12 +267,26 @@ fn escapes_in_every_remote_field_render_clean_on_every_screen() {
     ];
 
     // Act: render the list, every detail tab and the diff
-    let list_rows = draw(|frame| needs_me::render(frame, frame.area(), &list, &FixedClock));
+    let list_rows = draw(|frame| {
+        needs_me::render(
+            frame,
+            frame.area(),
+            &list,
+            &FixedClock::after_the_list_fixtures(),
+        )
+    });
     let tab_rows: Vec<(DetailTab, Vec<String>)> = tabs
         .iter()
         .map(|(tab, _)| {
             let app = detail_app(*tab);
-            let rows = draw(|frame| detail::render(frame, frame.area(), &app, &FixedClock));
+            let rows = draw(|frame| {
+                detail::render(
+                    frame,
+                    frame.area(),
+                    &app,
+                    &FixedClock::after_the_list_fixtures(),
+                )
+            });
             (*tab, rows)
         })
         .collect();

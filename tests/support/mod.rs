@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod clock;
 pub mod files;
 pub mod github;
 pub mod loop_harness;

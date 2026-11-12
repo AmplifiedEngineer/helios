@@ -2,9 +2,8 @@
 
 #[allow(dead_code)]
 mod support;
+use support::clock::FixedClock;
 
-use chrono::{TimeZone, Utc};
-use helios::app::refresh::Clock;
 use helios::app::worker::Loaded;
 use helios::app::{App, ListFilter};
 use helios::github::errors::GithubError;
@@ -15,7 +14,6 @@ use helios::tui::{list, mine, needs_me};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::fs;
-use std::time::SystemTime;
 use support::render::buffer_text;
 use support::snapshot::assert_snapshot;
 
@@ -31,18 +29,6 @@ const SCREEN_HEIGHT: u16 = 24;
 const REVIEW_TITLES: [&str; 2] = ["Shared change", "Review only"];
 const ASSIGNED_TITLES: [&str; 3] = ["Assigned only", "No checks yet", "Ghost PR"];
 const DRAFT_TITLE: &str = "Draft work";
-
-/// A clock stopped two hours after the fixtures' `updatedAt`.
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> SystemTime {
-        Utc.with_ymd_and_hms(2026, 11, 5, 12, 0, 0)
-            .single()
-            .expect("a valid instant")
-            .into()
-    }
-}
 
 fn fixture_rows(path: &str) -> Vec<PrSummary> {
     let json = fs::read_to_string(path).expect("read the list fixture");
@@ -74,7 +60,14 @@ fn render_needs_me_at(app: &App, width: u16) -> String {
     let mut terminal =
         Terminal::new(TestBackend::new(width, SCREEN_HEIGHT)).expect("test terminal");
     terminal
-        .draw(|frame| needs_me::render(frame, frame.area(), app, &FixedClock))
+        .draw(|frame| {
+            needs_me::render(
+                frame,
+                frame.area(),
+                app,
+                &FixedClock::after_the_list_fixtures(),
+            )
+        })
         .expect("draw");
     buffer_text(terminal.backend().buffer())
 }
@@ -311,7 +304,14 @@ fn the_mine_view_draws_the_mine_rows_and_ignores_the_tag_filter() {
 
     // Act
     terminal
-        .draw(|frame| mine::render(frame, frame.area(), &app, &FixedClock))
+        .draw(|frame| {
+            mine::render(
+                frame,
+                frame.area(),
+                &app,
+                &FixedClock::after_the_list_fixtures(),
+            )
+        })
         .expect("draw");
     let screen = buffer_text(terminal.backend().buffer());
 
@@ -346,7 +346,16 @@ fn the_renderer_draws_every_row_it_is_given_and_the_app_filters_drafts() {
 
     // Act
     terminal
-        .draw(|frame| list::render_rows(frame, frame.area(), &app, vec![&draft], &FixedClock, None))
+        .draw(|frame| {
+            list::render_rows(
+                frame,
+                frame.area(),
+                &app,
+                vec![&draft],
+                &FixedClock::after_the_list_fixtures(),
+                None,
+            )
+        })
         .expect("draw");
     let drawn = buffer_text(terminal.backend().buffer());
 

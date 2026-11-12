@@ -2,9 +2,9 @@
 
 #[allow(dead_code)]
 mod support;
+use support::clock::FixedClock;
 
 use chrono::{TimeZone, Utc};
-use helios::app::refresh::Clock;
 use helios::app::worker::Loaded;
 use helios::app::{App, DetailTab, Step};
 use helios::github::errors::GithubError;
@@ -13,7 +13,6 @@ use helios::sanitize::sanitize;
 use helios::tui::draw_with;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
-use std::time::SystemTime;
 use support::files::patch_file;
 use support::render::buffer_text;
 use support::snapshot::assert_snapshot;
@@ -22,17 +21,6 @@ const WIDTH: u16 = 100;
 const HEIGHT: u16 = 16;
 const HOST: &str = "github.com";
 const ACCOUNT: &str = "octo";
-
-struct FixedClock;
-
-impl Clock for FixedClock {
-    fn now(&self) -> SystemTime {
-        Utc.with_ymd_and_hms(2026, 11, 5, 12, 0, 0)
-            .single()
-            .expect("a valid instant")
-            .into()
-    }
-}
 
 fn row(number: u64, title: &str) -> PrSummary {
     PrSummary {
@@ -58,7 +46,7 @@ fn row(number: u64, title: &str) -> PrSummary {
 fn render(app: &App) -> String {
     let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).expect("test terminal");
     terminal
-        .draw(|frame| draw_with(frame, app, &FixedClock))
+        .draw(|frame| draw_with(frame, app, &FixedClock::after_the_list_fixtures()))
         .expect("draw");
     buffer_text(terminal.backend().buffer())
 }
