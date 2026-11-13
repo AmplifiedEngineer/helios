@@ -1,0 +1,60 @@
+Issue comments
+Ufktarimarge 2h
+Looks good.
+
+| quoted
+
+    let x = 1;
+Review threads
+acceptance/testdata/repo/repo-delete-private-forks.txtar
+  copilot-pull-request-reviewer 10d
+  🛑  Requirement: Poll for the fork count instead of using a fixed sleep
+
+  If GitHub takes more than five seconds to update the upstream's fork count, this test fails before exercising either
+  deletion path. Replace the sleep and one-shot lookup with bounded polling until the count is 1, failing on timeout
+  before attempting deletion. This follows the condition-based wait requirement in
+  .github/skills/writing-acceptance-tests/SKILL.md:94-96 and the existing wait-for-repository-ready helper pattern.
+  BagToad 9d
+  I mean, yeah but this is a problem with a bunch of tests already so gonna leave it
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

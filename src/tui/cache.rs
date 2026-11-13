@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 
 use ratatui::text::Line;
@@ -12,6 +12,7 @@ pub const MAX_CACHE_ENTRIES: usize = 2048;
 pub struct RenderCache {
     capacity: usize,
     state: RefCell<State>,
+    builds: Cell<usize>,
 }
 
 type Key = (String, u64, u16);
@@ -38,7 +39,13 @@ impl RenderCache {
         Self {
             capacity,
             state: RefCell::default(),
+            builds: Cell::new(0),
         }
+    }
+
+    /// How many times a builder ran, that is, how many lookups missed.
+    pub fn builds(&self) -> usize {
+        self.builds.get()
     }
 
     /// Returns the cached lines for the key, or builds and stores them.
@@ -66,6 +73,7 @@ impl RenderCache {
         }
 
         // The borrow is released so `build` can use the cache itself.
+        self.builds.set(self.builds.get() + 1);
         let lines = build();
 
         let mut state = self.state.borrow_mut();
