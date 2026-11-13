@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod cache;
 pub mod detail;
 pub mod diff;
 pub mod draw;
 pub mod keys;
 pub mod list;
+pub mod markdown;
 pub mod mine;
 pub mod needs_me;
 pub mod run;

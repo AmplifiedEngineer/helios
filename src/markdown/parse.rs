@@ -45,6 +45,7 @@ pub(super) enum Frame {
     Item(Vec<Block>),
     Quote(Vec<Block>),
     List(Vec<Vec<Block>>),
+    OrderedList(Vec<Vec<Block>>),
     Para(Vec<Inline>),
     Heading(u8, Vec<Inline>),
     Summary(Vec<Inline>),
@@ -128,7 +129,8 @@ impl Builder {
             Tag::Heading { level, .. } => Frame::Heading(level as u8, Vec::new()),
             Tag::BlockQuote(_) => Frame::Quote(Vec::new()),
             Tag::CodeBlock(kind) => Frame::Code(code_lang(&kind), String::new()),
-            Tag::List(_) => Frame::List(Vec::new()),
+            Tag::List(Some(_)) => Frame::OrderedList(Vec::new()),
+            Tag::List(None) => Frame::List(Vec::new()),
             Tag::Item => Frame::Item(Vec::new()),
             Tag::Table(_) => Frame::Table(Table::default(), Vec::new()),
             Tag::TableCell => Frame::Cell(Vec::new()),
@@ -155,7 +157,12 @@ impl Builder {
     pub(super) fn nesting(&self) -> usize {
         self.stack
             .iter()
-            .filter(|frame| matches!(frame, Frame::List(_) | Frame::Quote(_)))
+            .filter(|frame| {
+                matches!(
+                    frame,
+                    Frame::List(_) | Frame::OrderedList(_) | Frame::Quote(_)
+                )
+            })
             .count()
     }
 
@@ -239,11 +246,12 @@ impl Builder {
         match frame {
             Frame::Root(_) => {}
             Frame::Item(blocks) => match self.stack.last_mut() {
-                Some(Frame::List(items)) => items.push(blocks),
+                Some(Frame::List(items) | Frame::OrderedList(items)) => items.push(blocks),
                 _ => blocks.into_iter().for_each(|block| self.add_block(block)),
             },
             Frame::Quote(blocks) => self.add_block(Block::Quote(blocks)),
             Frame::List(items) => self.add_block(Block::List(items)),
+            Frame::OrderedList(items) => self.add_block(Block::OrderedList(items)),
             Frame::Para(content) => self.add_block(Block::Paragraph(content)),
             Frame::Heading(level, content) => self.add_block(Block::Heading { level, content }),
             Frame::Code(lang, text) => self.add_block(Block::Code {
@@ -340,7 +348,7 @@ fn is_ended_by(frame: &Frame, tag: &TagEnd) -> bool {
         (frame, tag),
         (Frame::Item(_), TagEnd::Item)
             | (Frame::Quote(_), TagEnd::BlockQuote(_))
-            | (Frame::List(_), TagEnd::List(_))
+            | (Frame::List(_) | Frame::OrderedList(_), TagEnd::List(_))
             | (Frame::Para(_), TagEnd::Paragraph)
             | (Frame::Heading(..), TagEnd::Heading(_))
             | (Frame::Code(..), TagEnd::CodeBlock)
