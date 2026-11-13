@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-const EXPECTED: [&str; 9] = [
+const EXPECTED: [&str; 10] = [
     "ratatui",
     "crossterm",
     "tokio",
@@ -14,6 +14,7 @@ const EXPECTED: [&str; 9] = [
     "thiserror",
     "clap",
     "chrono",
+    "pulldown-cmark",
 ];
 
 const KINDS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
