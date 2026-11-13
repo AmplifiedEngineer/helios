@@ -157,6 +157,10 @@ where
     /// One turn of the loop: results, the refresh timer, at most one event, then a frame
     /// when anything changed. It waits at most `timeout` for the event.
     pub fn step(&mut self, timeout: Duration) -> io::Result<Flow> {
+        // The last frame left diff lines unhighlighted, so draw again to fill in more.
+        if self.cache.take_pending() {
+            self.dirty = true;
+        }
         self.drain_results();
         if self.app.is_loading() {
             self.app.tick();

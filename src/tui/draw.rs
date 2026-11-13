@@ -13,7 +13,8 @@ use ratatui::Frame;
 use crate::app::refresh::Clock;
 use crate::app::{App, DetailTab, FileRow, ListView, Screen};
 use crate::sanitize::sanitize;
-use crate::tui::cache::RenderCache;
+use crate::tui::cache::{HighlightBudget, RenderCache};
+use crate::tui::diff::Highlighting;
 use crate::tui::keys::{self, Scope};
 use crate::tui::layout::{self, LayoutSettings, Panes, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 use crate::tui::style::Styles;
@@ -60,6 +61,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 /// Draws the app, reusing rendered lines from `cache`.
 pub fn draw_cached(frame: &mut Frame, app: &App, clock: &impl Clock, cache: &RenderCache) {
+    // Only a diff drawn in this frame can ask for another one.
+    cache.clear_pending();
+    let budget = HighlightBudget::per_frame();
     let area = frame.area();
     if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
         let text = format!("{TOO_SMALL_PREFIX} {MIN_TERMINAL_WIDTH}x{MIN_TERMINAL_HEIGHT}");
@@ -70,7 +74,7 @@ pub fn draw_cached(frame: &mut Frame, app: &App, clock: &impl Clock, cache: &Ren
     let footer_height = keys::footer_height(scope, area.width);
     let [body, footer] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(area);
-    draw_panes(frame, body, app, clock, cache);
+    draw_panes(frame, body, app, clock, cache, &budget);
     keys::render_footer_for(frame, footer, Some(scope));
     if app.show_help {
         draw_help(frame, body, scope);
@@ -156,7 +160,14 @@ fn note_or_alert(app: &App, shown_on: Screen, note: impl FnOnce() -> String) -> 
 }
 
 /// Draws the screen's panes inside `body`: two side by side on a split list screen, else one.
-fn draw_panes(frame: &mut Frame, body: Rect, app: &App, clock: &impl Clock, cache: &RenderCache) {
+fn draw_panes(
+    frame: &mut Frame,
+    body: Rect,
+    app: &App,
+    clock: &impl Clock,
+    cache: &RenderCache,
+    budget: &HighlightBudget,
+) {
     if app.is_split() && app.screen == Screen::List {
         if let Panes::Split { list, detail } =
             layout::panes(body, app.pane, &LayoutSettings::default())
@@ -166,14 +177,16 @@ fn draw_panes(frame: &mut Frame, body: Rect, app: &App, clock: &impl Clock, cach
                 layout::Pane::Detail => (Focus::Unfocused, Focus::Focused),
             };
             draw_list_pane(frame, list, app, clock, list_focus);
-            draw_detail_pane(frame, detail, app, clock, cache, detail_focus);
+            draw_detail_pane(frame, detail, app, (clock, cache, budget), detail_focus);
             return;
         }
     }
     match app.screen {
         Screen::List => draw_list_pane(frame, body, app, clock, Focus::Unmarked),
-        Screen::Detail => draw_detail_pane(frame, body, app, clock, cache, Focus::Unmarked),
-        Screen::Diff => draw_diff_pane(frame, body, app),
+        Screen::Detail => {
+            draw_detail_pane(frame, body, app, (clock, cache, budget), Focus::Unmarked)
+        }
+        Screen::Diff => draw_diff_pane(frame, body, app, cache, budget),
     }
 }
 
@@ -196,8 +209,7 @@ fn draw_detail_pane(
     frame: &mut Frame,
     area: Rect,
     app: &App,
-    clock: &impl Clock,
-    cache: &RenderCache,
+    (clock, cache, budget): (&impl Clock, &RenderCache, &HighlightBudget),
     focus: Focus,
 ) {
     let note = note_or_alert(app, Screen::Detail, || {
@@ -211,13 +223,19 @@ fn draw_detail_pane(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if app.selected.is_some() {
-        detail::render_cached(frame, inner, app, clock, cache);
+        detail::render_budgeted(frame, inner, app, clock, cache, budget);
     } else {
         frame.render_widget(Paragraph::new(NO_SELECTION_TEXT), inner);
     }
 }
 
-fn draw_diff_pane(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_diff_pane(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    cache: &RenderCache,
+    budget: &HighlightBudget,
+) {
     let note = note_or_alert(app, Screen::Diff, String::new);
     let block = pane_block(
         Line::from(DIFF_HEADER),
@@ -227,7 +245,7 @@ fn draw_diff_pane(frame: &mut Frame, area: Rect, app: &App) {
     );
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    draw_diff(frame, inner, app);
+    draw_diff(frame, inner, app, cache, budget);
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
@@ -254,10 +272,23 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
     }
 }
 
-fn draw_diff(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_diff(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    cache: &RenderCache,
+    budget: &HighlightBudget,
+) {
     if let Some(file) = app.selected_file() {
-        let options = diff::DiffOptions { color: true };
-        diff::render_scrolled(frame, area, file, options, app.diff_scroll());
+        let pr_key = app.selected.as_ref().map(detail::pr_key_text);
+        let highlight = Highlighting::for_theme(
+            app.theme(),
+            pr_key.as_deref().unwrap_or_default(),
+            cache,
+            budget,
+        );
+        let styles = Styles::of(app);
+        diff::render_highlighted(frame, area, file, app.diff_scroll(), &styles, highlight);
     }
 }
 

@@ -22,11 +22,14 @@ use helios::app::App;
 use helios::github::errors::GithubError;
 use helios::github::queries::{FilesListing, ListKind, Listing};
 use helios::github::GithubApi;
-use helios::model::{DetailCounts, PrDetail, PrKey, PrState, PrSummary, ReviewDecision};
+use helios::model::{
+    ChangedFile, DetailCounts, PrDetail, PrKey, PrState, PrSummary, ReviewDecision,
+};
 use helios::sanitize::sanitize;
 use helios::tui::run::{EventSource, Flow, Session};
-use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
+use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
+use ratatui::buffer::{Buffer, Cell};
+use ratatui::layout::{Position, Size};
 use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 
@@ -81,8 +84,77 @@ fn summary(login: &str, number: u64, title: &str) -> PrSummary {
     }
 }
 
+/// A test terminal that counts how many times a frame is flushed to it.
+pub struct CountingBackend {
+    inner: TestBackend,
+    draws: Arc<AtomicUsize>,
+}
+
+impl CountingBackend {
+    fn new(width: u16, height: u16, draws: Arc<AtomicUsize>) -> Self {
+        Self {
+            inner: TestBackend::new(width, height),
+            draws,
+        }
+    }
+
+    pub fn buffer(&self) -> &Buffer {
+        self.inner.buffer()
+    }
+}
+
+impl Backend for CountingBackend {
+    type Error = <TestBackend as Backend>::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        self.draws.fetch_add(1, Ordering::SeqCst);
+        self.inner.draw(content)
+    }
+
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor()
+    }
+
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor()
+    }
+
+    fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+
+    fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear_type)
+    }
+
+    fn size(&self) -> Result<Size, Self::Error> {
+        self.inner.size()
+    }
+
+    fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+        self.inner.window_size()
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.flush()
+    }
+}
+
 /// Answers every call from fixed data, counts the list calls, or fails them all.
 pub struct FakeApi {
+    /// The changed files every files call returns.
+    pub files: Vec<ChangedFile>,
     pub login: String,
     pub list_calls: Arc<AtomicUsize>,
     pub detail_calls: Arc<AtomicUsize>,
@@ -103,6 +175,10 @@ impl FakeApi {
 
     pub fn for_login(login: &str) -> Self {
         Self {
+            files: vec![
+                patch_file("src/a.rs", "added in a"),
+                patch_file("src/b.rs", "added in b"),
+            ],
             login: login.into(),
             list_calls: Arc::new(AtomicUsize::new(0)),
             detail_calls: Arc::new(AtomicUsize::new(0)),
@@ -164,10 +240,7 @@ impl GithubApi for FakeApi {
     ) -> Result<FilesListing, GithubError> {
         Self::fail(self.detail_failure)?;
         Ok(FilesListing {
-            files: vec![
-                patch_file("src/a.rs", "added in a"),
-                patch_file("src/b.rs", "added in b"),
-            ],
+            files: self.files.clone(),
             truncated: false,
         })
     }
@@ -224,8 +297,9 @@ impl EventSource for Script {
 }
 
 pub struct Harness {
-    pub session: Session<TestBackend, Script, TestClock, FakeApi>,
+    pub session: Session<CountingBackend, Script, TestClock, FakeApi>,
     pub clock: TestClock,
+    draws: Arc<AtomicUsize>,
     pub list_calls: Arc<AtomicUsize>,
     pub detail_calls: Arc<AtomicUsize>,
     script: Script,
@@ -249,12 +323,23 @@ impl Harness {
         harness
     }
 
+    /// Like `start`, on a terminal of `width` by `height`, for a diff that needs room.
+    pub fn start_with_size(api: FakeApi, width: u16, height: u16) -> Self {
+        let mut harness = Self::start_sized_to(vec![api], width, height);
+        harness.settle();
+        harness
+    }
+
     /// A loop over `apis`, one account each, with the first load still running.
     pub fn start_unsettled(apis: Vec<FakeApi>) -> Self {
         Self::start_sized(apis, SCREEN_WIDTH)
     }
 
     fn start_sized(apis: Vec<FakeApi>, width: u16) -> Self {
+        Self::start_sized_to(apis, width, SCREEN_HEIGHT)
+    }
+
+    fn start_sized_to(apis: Vec<FakeApi>, width: u16, height: u16) -> Self {
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let list_calls = apis.first().map_or_else(
             || Arc::new(AtomicUsize::new(0)),
@@ -278,8 +363,9 @@ impl Harness {
             when().timestamp_millis().unsigned_abs(),
         )));
         let script = Script::default();
-        let terminal =
-            Terminal::new(TestBackend::new(width, SCREEN_HEIGHT)).expect("test terminal");
+        let draws = Arc::new(AtomicUsize::new(0));
+        let terminal = Terminal::new(CountingBackend::new(width, height, Arc::clone(&draws)))
+            .expect("test terminal");
         let session = Session::new(
             terminal,
             App::new(),
@@ -291,6 +377,7 @@ impl Harness {
         Self {
             session,
             clock,
+            draws,
             list_calls,
             detail_calls,
             script,
@@ -336,6 +423,22 @@ impl Harness {
     /// Presses a key, lets the loop handle it and every load it starts finish.
     pub fn press(&mut self, code: KeyCode) -> Flow {
         self.press_with(code, KeyModifiers::NONE)
+    }
+
+    /// Presses a key and takes exactly one step, so the next step is the next tick.
+    pub fn press_once(&mut self, code: KeyCode) -> Flow {
+        self.script.push(Event::Key(KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }));
+        self.step()
+    }
+
+    /// How many frames have been flushed to the terminal so far.
+    pub fn draws(&self) -> usize {
+        self.draws.load(Ordering::SeqCst)
     }
 
     pub fn press_with(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Flow {

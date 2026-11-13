@@ -127,26 +127,41 @@ fn line_roles(line: &str, state: &mut ParseState, stack: &mut ScopeStack) -> Opt
     Some(row)
 }
 
-/// Returns one `LineRoles` per input line for a language token or file path.
+/// Highlights one block a line at a time, keeping the parser state between lines.
 ///
 /// An unknown language gives plain lines. A line over `MAX_HIGHLIGHT_LINE`
 /// is plain and is not fed to the parser, so the state for later lines stays valid.
-pub fn highlight(language_or_path: &str, lines: &[&str]) -> Vec<LineRoles> {
-    let Some(syntax) = find_syntax(language_or_path) else {
-        return lines.iter().map(|line| plain(line)).collect();
-    };
-    let mut state = ParseState::new(syntax);
-    let mut stack = ScopeStack::new();
-    lines
-        .iter()
-        .map(|line| {
-            if line.len() > MAX_HIGHLIGHT_LINE {
-                return plain(line);
-            }
-            line_roles(line, &mut state, &mut stack).unwrap_or_else(|| {
-                stack = ScopeStack::new();
-                plain(line)
-            })
+#[derive(Clone)]
+pub struct BlockHighlighter {
+    parser: Option<(ParseState, ScopeStack)>,
+}
+
+impl BlockHighlighter {
+    /// A highlighter for a language token or file path.
+    pub fn new(language_or_path: &str) -> Self {
+        Self {
+            parser: find_syntax(language_or_path)
+                .map(|syntax| (ParseState::new(syntax), ScopeStack::new())),
+        }
+    }
+
+    /// The roles of the next line of the block.
+    pub fn feed(&mut self, line: &str) -> LineRoles {
+        let Some((state, stack)) = &mut self.parser else {
+            return plain(line);
+        };
+        if line.len() > MAX_HIGHLIGHT_LINE {
+            return plain(line);
+        }
+        line_roles(line, state, stack).unwrap_or_else(|| {
+            *stack = ScopeStack::new();
+            plain(line)
         })
-        .collect()
+    }
+}
+
+/// Returns one `LineRoles` per input line for a language token or file path.
+pub fn highlight(language_or_path: &str, lines: &[&str]) -> Vec<LineRoles> {
+    let mut block = BlockHighlighter::new(language_or_path);
+    lines.iter().map(|line| block.feed(line)).collect()
 }

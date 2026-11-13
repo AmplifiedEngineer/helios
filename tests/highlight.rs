@@ -2,7 +2,7 @@
 
 //! The highlighter turns source lines into code roles.
 
-use helios::highlight::{highlight, LineRoles, MAX_HIGHLIGHT_LINE};
+use helios::highlight::{highlight, BlockHighlighter, LineRoles, MAX_HIGHLIGHT_LINE};
 use helios::theme::Role;
 
 /// Turns the roles of a line into (role, text) pairs.
@@ -190,4 +190,56 @@ fn jsx_and_tsx_map_to_their_base_language() {
         assert!(!is_plain(&rows[0]), "{token}: {found:?}");
         assert!(has(&found, Role::Keyword, "const"), "{token}: {found:?}");
     }
+}
+
+#[test]
+fn feeding_line_by_line_equals_one_call_to_highlight() {
+    // Arrange
+    let long = format!("/* {}", "x".repeat(MAX_HIGHLIGHT_LINE));
+    let lines = [
+        "/* opened here",
+        "still inside the comment",
+        "*/ fn main() {",
+        &long,
+        "let s = \"hi\"; // note",
+    ];
+    let mut block = BlockHighlighter::new("rust");
+
+    // Act
+    let fed: Vec<LineRoles> = lines.iter().map(|line| block.feed(line)).collect();
+
+    // Assert
+    assert_eq!(fed, highlight("rust", &lines));
+}
+
+#[test]
+fn a_cloned_highlighter_resumes_from_the_same_state() {
+    // Arrange
+    let mut block = BlockHighlighter::new("rust");
+    block.feed("/* opened here");
+    let mut copy = block.clone();
+
+    // Act
+    let original = block.feed("still inside the comment");
+    let cloned = copy.feed("still inside the comment");
+
+    // Assert
+    assert_eq!(original, cloned);
+    assert!(has(
+        &spans("still inside the comment", &original),
+        Role::Comment,
+        "still inside the comment"
+    ));
+}
+
+#[test]
+fn an_unknown_language_feeds_plain_lines() {
+    // Arrange
+    let mut block = BlockHighlighter::new("no-such-language");
+
+    // Act
+    let roles = block.feed("fn main() {}");
+
+    // Assert
+    assert_eq!(roles, vec![(Role::Plain, 0.."fn main() {}".len())]);
 }
