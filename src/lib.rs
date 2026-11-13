@@ -13,4 +13,5 @@ pub mod sanitize;
 pub mod secret;
 pub mod smoke;
 pub mod test_files;
+pub mod theme;
 pub mod tui;
