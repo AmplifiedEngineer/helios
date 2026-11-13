@@ -42,7 +42,12 @@ pub enum Inline {
         url: Option<String>,
         content: Vec<Inline>,
     },
-    ImageAlt(String),
+    Image {
+        alt: String,
+        url: Option<String>,
+    },
+    /// The `[ ]` or `[x]` box that opens a task list item.
+    TaskMarker(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
