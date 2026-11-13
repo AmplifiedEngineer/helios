@@ -12,7 +12,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::refresh::Clock;
-use crate::app::{App, DetailState, DetailTab};
+use crate::app::{App, DetailState, DetailTab, FileRow};
 use crate::github::octo::MAX_FILES;
 use crate::markdown::from_remote;
 use crate::model::{
@@ -21,6 +21,7 @@ use crate::model::{
 };
 use crate::remote::Remote;
 use crate::tui::cache::RenderCache;
+use crate::tui::diff::{count_changes, inline_lines};
 use crate::tui::list::{age_since, failure_message};
 use crate::tui::markdown::render as render_markdown;
 
@@ -36,6 +37,12 @@ const CHECKS_NOUN: &str = "checks";
 const FILES_CUT_NOTE_PREFIX: &str = "Showing the first";
 const FILES_CUT_NOTE_SUFFIX: &str = "files";
 const FILES_LOADING_TEXT: &str = "Loading files...";
+pub const NO_FILES_TEXT: &str = "No files changed.";
+const CLOSED_MARKER: &str = "▸";
+const OPEN_MARKER: &str = "▾";
+const COUNTS_GAP: &str = "  ";
+const TEST_INDENT: &str = "  ";
+const DIFF_INDENT: &str = "  ";
 const MARK_RENAMED_FROM: &str = "renamed from";
 const MARK_TRUNCATED: &str = "truncated";
 const MARK_CHANGED_NO_TEXT: &str = "binary or mode change";
@@ -89,6 +96,7 @@ pub fn render_cached(
         pr_key: app.selected.as_ref().map(pr_key_text).unwrap_or_default(),
         width: area.width,
     };
+    let mut cursor_line = 0;
     let lines = match app.detail() {
         DetailState::Loading => vec![Line::from(LOADING_TEXT)],
         DetailState::Failed(error) => vec![Line::from(failure_message(error))],
@@ -100,7 +108,11 @@ pub fn render_cached(
                 COMMITS_NOUN,
                 commit_lines(&detail.commits, clock),
             ),
-            DetailTab::Files => file_lines(app),
+            DetailTab::Files => {
+                let drawn = file_lines(app, area.width);
+                cursor_line = drawn.cursor_line;
+                drawn.lines
+            }
             DetailTab::Checks => with_count_note(
                 detail.counts.checks,
                 CHECKS_NOUN,
@@ -109,7 +121,7 @@ pub fn render_cached(
         },
     };
     let on_files = app.tab == DetailTab::Files;
-    let files_offset = on_files.then(|| files_scroll(app, &lines, area));
+    let files_offset = on_files.then(|| files_scroll(&lines, cursor_line, area));
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     let scroll = if let Some(offset) = files_offset {
         offset
@@ -130,16 +142,11 @@ fn pr_key_text(key: &PrKey) -> String {
     format!("{}/{}/{}#{}", key.host, key.account, key.repo, key.number)
 }
 
-/// How far the Files tab scrolls so the last row of the selected file stays in view, counting
-/// the rows a long path wraps onto.
-fn files_scroll(app: &App, lines: &[Line<'static>], area: Rect) -> u16 {
-    let selected = app.file_cursor();
-    let note_rows = usize::from(app.files_truncated());
-    let through_selected: Vec<Line<'static>> = lines
-        .iter()
-        .take(selected + note_rows + 1)
-        .cloned()
-        .collect();
+/// How far the Files tab scrolls so the cursor row stays in view, counting the rows a long path
+/// wraps onto and the open diffs above it.
+fn files_scroll(lines: &[Line<'static>], cursor_line: usize, area: Rect) -> u16 {
+    let through_selected: Vec<Line<'static>> =
+        lines.iter().take(cursor_line + 1).cloned().collect();
     let rows = Paragraph::new(through_selected)
         .wrap(Wrap { trim: false })
         .line_count(area.width);
@@ -203,34 +210,101 @@ fn commit_lines(commits: &[CommitSummary], clock: &impl Clock) -> Vec<Line<'stat
         .collect()
 }
 
-fn file_lines(app: &App) -> Vec<Line<'static>> {
+/// The Files tab lines and the index of the one holding the cursor row.
+struct FileLines {
+    lines: Vec<Line<'static>>,
+    cursor_line: usize,
+}
+
+impl FileLines {
+    fn only(line: Line<'static>) -> Self {
+        Self {
+            lines: vec![line],
+            cursor_line: 0,
+        }
+    }
+}
+
+fn file_lines(app: &App, width: u16) -> FileLines {
     if let Some(error) = app.files_failure() {
-        return vec![Line::from(failure_message(error))];
+        return FileLines::only(Line::from(failure_message(error)));
     }
     let Some(files) = app.files() else {
-        return vec![Line::from(FILES_LOADING_TEXT)];
+        return FileLines::only(Line::from(FILES_LOADING_TEXT));
     };
-    let selected = app.file_cursor();
-    let note = app.files_truncated().then(|| {
-        Line::from(format!(
-            "{FILES_CUT_NOTE_PREFIX} {MAX_FILES} {FILES_CUT_NOTE_SUFFIX}"
-        ))
-    });
-    note.into_iter()
-        .chain(files.iter().enumerate().map(|(index, file)| {
-            let marks = file_marks(file);
-            let line = if marks.is_empty() {
-                Line::from(file.path.to_string())
-            } else {
-                Line::from(format!("{} [{}]", file.path, marks.join(", ")))
-            };
-            if index == selected {
-                line.style(Style::new().add_modifier(Modifier::REVERSED))
-            } else {
-                line
+    if files.is_empty() {
+        return FileLines::only(Line::from(NO_FILES_TEXT));
+    }
+    let mut lines: Vec<Line<'static>> = app
+        .files_truncated()
+        .then(|| {
+            Line::from(format!(
+                "{FILES_CUT_NOTE_PREFIX} {MAX_FILES} {FILES_CUT_NOTE_SUFFIX}"
+            ))
+        })
+        .into_iter()
+        .collect();
+    let cursor = app.file_cursor();
+    let mut cursor_line = lines.len();
+    let mut in_tests = false;
+    for (position, row) in app.file_rows().into_iter().enumerate() {
+        if position == cursor {
+            cursor_line = lines.len();
+        }
+        let indent = if in_tests { TEST_INDENT } else { "" };
+        let mut open_file = None;
+        let text = match row {
+            FileRow::Tests(count) => {
+                in_tests = true;
+                tests_row_text(count, app.tests_open())
             }
-        }))
-        .collect()
+            FileRow::File(index) => {
+                let Some(file) = files.get(index) else {
+                    continue;
+                };
+                let open = app.is_file_open(index);
+                open_file = open.then_some(file);
+                file_row_text(file, open, indent)
+            }
+        };
+        let line = Line::from(text);
+        lines.push(if position == cursor {
+            line.style(Style::new().add_modifier(Modifier::REVERSED))
+        } else {
+            line
+        });
+        if let Some(file) = open_file {
+            let diff_indent = format!("{indent}{DIFF_INDENT}");
+            lines.extend(inline_lines(file, usize::from(width), &diff_indent));
+        }
+    }
+    FileLines { lines, cursor_line }
+}
+
+fn marker(open: bool) -> &'static str {
+    if open {
+        OPEN_MARKER
+    } else {
+        CLOSED_MARKER
+    }
+}
+
+fn tests_row_text(count: usize, open: bool) -> String {
+    format!("{} Tests ({count} files)", marker(open))
+}
+
+/// One file row: the marker, the path, the marks, then the `+added -removed` counts.
+fn file_row_text(file: &ChangedFile, open: bool, indent: &str) -> String {
+    let marks = file_marks(file);
+    let mut text = format!("{indent}{} {}", marker(open), file.path);
+    if !marks.is_empty() {
+        text.push_str(&format!(" [{}]", marks.join(", ")));
+    }
+    if let FileDiff::Patch(patch) = &file.diff {
+        let (added, removed) = count_changes(patch.as_str());
+        text.push_str(&format!("{COUNTS_GAP}+{added} -{removed}"));
+    }
+    text
 }
 
 fn file_marks(file: &ChangedFile) -> Vec<String> {
