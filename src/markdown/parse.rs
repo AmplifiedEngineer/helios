@@ -2,6 +2,7 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
+use super::html::Lexer;
 use super::{Block, Document, Inline, Table, MAX_BLOCKS, MAX_BODY_BYTES, MAX_NESTING};
 use crate::remote::Remote;
 use crate::sanitize::sanitize;
@@ -38,41 +39,55 @@ fn clip(body: &str) -> (&str, bool) {
 }
 
 /// One open element on the builder stack.
-enum Frame {
+#[derive(Debug)]
+pub(super) enum Frame {
     Root(Vec<Block>),
     Item(Vec<Block>),
     Quote(Vec<Block>),
     List(Vec<Vec<Block>>),
     Para(Vec<Inline>),
     Heading(u8, Vec<Inline>),
+    Summary(Vec<Inline>),
     Emphasis(Vec<Inline>),
     Strong(Vec<Inline>),
     Link(Option<String>, Vec<Inline>),
     Image(Option<String>, String),
     Code(Option<String>, String),
+    Pre(String),
+    InlineCode(String),
     Table(Table, Vec<Vec<Inline>>),
     Cell(Vec<Inline>),
 }
 
-struct Builder {
-    stack: Vec<Frame>,
+/// Builds blocks from markdown events and HTML fragments on one shared stack.
+#[derive(Debug)]
+pub(super) struct Builder {
+    pub(super) stack: Vec<Frame>,
     blocks_added: usize,
     cut: bool,
     /// Open list, quote and item tags that were flattened into their parent.
-    flattened: usize,
+    pub(super) flattened: usize,
+    pub(super) lexer: Lexer,
 }
 
 impl Builder {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             stack: vec![Frame::Root(Vec::new())],
             blocks_added: 0,
             cut: false,
             flattened: 0,
+            lexer: Lexer::default(),
         }
     }
 
-    fn finish(mut self) -> Vec<Block> {
+    /// Closes every open element and returns the blocks.
+    pub(super) fn finish(mut self) -> Vec<Block> {
+        let tokens = self.lexer.finish();
+        self.html_tokens(tokens);
+        while self.stack.len() > 1 {
+            self.close();
+        }
         match self.stack.pop() {
             Some(Frame::Root(blocks)) => blocks,
             _ => Vec::new(),
@@ -88,6 +103,7 @@ impl Builder {
             Event::SoftBreak => self.text(" "),
             Event::HardBreak => self.text("\n"),
             Event::TaskListMarker(checked) => self.push_inline(Inline::TaskMarker(checked)),
+            Event::Html(html) | Event::InlineHtml(html) => self.html(&html),
             Event::Rule => {
                 self.flush_implicit_paragraph();
                 self.add_block(Block::Rule);
@@ -133,7 +149,7 @@ impl Builder {
         }
     }
 
-    fn nesting(&self) -> usize {
+    pub(super) fn nesting(&self) -> usize {
         self.stack
             .iter()
             .filter(|frame| matches!(frame, Frame::List(_) | Frame::Quote(_)))
@@ -151,7 +167,7 @@ impl Builder {
         match tag {
             TagEnd::Item | TagEnd::BlockQuote(_) => {
                 self.flush_implicit_paragraph();
-                self.close();
+                self.close_through(&tag);
             }
             TagEnd::TableHead => self.end_table_head(),
             TagEnd::TableRow => self.end_table_row(),
@@ -164,7 +180,7 @@ impl Builder {
             | TagEnd::Emphasis
             | TagEnd::Strong
             | TagEnd::Link
-            | TagEnd::Image => self.close(),
+            | TagEnd::Image => self.close_through(&tag),
             _ => {}
         }
     }
@@ -181,8 +197,23 @@ impl Builder {
         }
     }
 
+    /// Closes the frame `tag` ends, and any HTML element left open inside it.
+    fn close_through(&mut self, tag: &TagEnd) {
+        if !self.stack.iter().any(|frame| is_ended_by(frame, tag)) {
+            return;
+        }
+        while self
+            .stack
+            .last()
+            .is_some_and(|frame| !is_ended_by(frame, tag))
+        {
+            self.close();
+        }
+        self.close();
+    }
+
     /// Pops the top frame and hands the finished element to its parent.
-    fn close(&mut self) {
+    pub(super) fn close(&mut self) {
         if self.stack.len() < 2 {
             return;
         }
@@ -191,11 +222,10 @@ impl Builder {
         };
         match frame {
             Frame::Root(_) => {}
-            Frame::Item(blocks) => {
-                if let Some(Frame::List(items)) = self.stack.last_mut() {
-                    items.push(blocks);
-                }
-            }
+            Frame::Item(blocks) => match self.stack.last_mut() {
+                Some(Frame::List(items)) => items.push(blocks),
+                _ => blocks.into_iter().for_each(|block| self.add_block(block)),
+            },
             Frame::Quote(blocks) => self.add_block(Block::Quote(blocks)),
             Frame::List(items) => self.add_block(Block::List(items)),
             Frame::Para(content) => self.add_block(Block::Paragraph(content)),
@@ -204,6 +234,14 @@ impl Builder {
                 lang,
                 text: clean(text.strip_suffix('\n').unwrap_or(&text)),
             }),
+            Frame::Summary(content) => {
+                self.add_block(Block::Paragraph(vec![Inline::Strong(content)]));
+            }
+            Frame::Pre(text) => self.add_block(Block::Code {
+                lang: None,
+                text: clean(&text),
+            }),
+            Frame::InlineCode(text) => self.push_inline(Inline::Code(clean(&text))),
             Frame::Table(table, _) => self.add_block(Block::Table(table)),
             Frame::Cell(content) => {
                 if let Some(Frame::Table(_, row)) = self.stack.last_mut() {
@@ -221,13 +259,13 @@ impl Builder {
     }
 
     /// Closes the paragraph a tight list item opens without a paragraph tag.
-    fn flush_implicit_paragraph(&mut self) {
+    pub(super) fn flush_implicit_paragraph(&mut self) {
         if matches!(self.stack.last(), Some(Frame::Para(_))) {
             self.close();
         }
     }
 
-    fn add_block(&mut self, block: Block) {
+    pub(super) fn add_block(&mut self, block: Block) {
         self.blocks_added += 1;
         if self.blocks_added > MAX_BLOCKS {
             self.cut = true;
@@ -240,14 +278,19 @@ impl Builder {
         }
     }
 
-    fn text(&mut self, text: &str) {
+    pub(super) fn text(&mut self, text: &str) {
         match self.stack.last_mut() {
-            Some(Frame::Code(_, buffer) | Frame::Image(_, buffer)) => buffer.push_str(text),
+            Some(
+                Frame::Code(_, buffer)
+                | Frame::Image(_, buffer)
+                | Frame::Pre(buffer)
+                | Frame::InlineCode(buffer),
+            ) => buffer.push_str(text),
             _ => self.push_inline(Inline::Text(clean(text))),
         }
     }
 
-    fn push_inline(&mut self, inline: Inline) {
+    pub(super) fn push_inline(&mut self, inline: Inline) {
         if matches!(
             self.stack.last(),
             Some(Frame::Root(_) | Frame::Item(_) | Frame::Quote(_))
@@ -264,6 +307,7 @@ impl Builder {
             Some(
                 Frame::Para(inlines)
                 | Frame::Heading(_, inlines)
+                | Frame::Summary(inlines)
                 | Frame::Emphasis(inlines)
                 | Frame::Strong(inlines)
                 | Frame::Link(_, inlines)
@@ -272,6 +316,25 @@ impl Builder {
             _ => None,
         }
     }
+}
+
+/// Whether `tag` is the end of the element `frame` holds.
+fn is_ended_by(frame: &Frame, tag: &TagEnd) -> bool {
+    matches!(
+        (frame, tag),
+        (Frame::Item(_), TagEnd::Item)
+            | (Frame::Quote(_), TagEnd::BlockQuote(_))
+            | (Frame::List(_), TagEnd::List(_))
+            | (Frame::Para(_), TagEnd::Paragraph)
+            | (Frame::Heading(..), TagEnd::Heading(_))
+            | (Frame::Code(..), TagEnd::CodeBlock)
+            | (Frame::Table(..), TagEnd::Table)
+            | (Frame::Cell(_), TagEnd::TableCell)
+            | (Frame::Emphasis(_), TagEnd::Emphasis)
+            | (Frame::Strong(_), TagEnd::Strong)
+            | (Frame::Link(..), TagEnd::Link)
+            | (Frame::Image(..), TagEnd::Image)
+    )
 }
 
 fn push_merging_text(inlines: &mut Vec<Inline>, inline: Inline) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::parse::{clean, url};
-use super::{Block, Inline, MAX_NESTING};
+use super::parse::{clean, url, Builder, Frame};
+use super::{Block, MAX_NESTING};
 
 const HEADING_LEVELS: std::ops::RangeInclusive<u8> = 1..=6;
 
@@ -22,37 +22,7 @@ const SKIPPED_ELEMENTS: [&str; 2] = ["script", "style"];
 /// Turns the HTML fragments of one body into blocks, keeping state across fragments.
 #[derive(Debug)]
 pub struct HtmlTokenizer {
-    /// An unfinished `<...` carried over until a later fragment closes it.
-    pending: String,
-    /// The element whose content is being dropped, until its closing tag.
-    skipping: Option<&'static str>,
-    stack: Vec<Frame>,
-    /// Lists and quotes opened past `MAX_NESTING`, whose closing tags are ignored.
-    flattened: usize,
-}
-
-/// One open element on the tokenizer stack.
-#[derive(Debug)]
-enum Frame {
-    Root(Vec<Block>),
-    Item(Vec<Block>),
-    Quote(Vec<Block>),
-    List(Vec<Vec<Block>>),
-    Para(Vec<Inline>),
-    Heading(u8, Vec<Inline>),
-    Summary(Vec<Inline>),
-    Emphasis(Vec<Inline>),
-    Strong(Vec<Inline>),
-    Link(Option<String>, Vec<Inline>),
-    Pre(String),
-    InlineCode(String),
-}
-
-/// A parsed tag: its lowercase name, whether it closes, and its raw attribute text.
-struct Tag<'a> {
-    name: String,
-    closing: bool,
-    attrs: &'a str,
+    builder: Builder,
 }
 
 impl Default for HtmlTokenizer {
@@ -64,22 +34,55 @@ impl Default for HtmlTokenizer {
 impl HtmlTokenizer {
     pub fn new() -> Self {
         Self {
-            pending: String::new(),
-            skipping: None,
-            stack: vec![Frame::Root(Vec::new())],
-            flattened: 0,
+            builder: Builder::new(),
         }
     }
 
     pub fn feed(&mut self, fragment: &str) {
+        self.builder.html(fragment);
+    }
+
+    /// Closes every open element and returns the blocks. A tag left unfinished is dropped.
+    pub fn finish(self) -> Vec<Block> {
+        self.builder.finish()
+    }
+}
+
+/// One piece of an HTML fragment, in the order it appears.
+#[derive(Debug)]
+pub(super) enum Token {
+    Open { name: String, href: Option<String> },
+    Close(String),
+    Text(String),
+}
+
+/// Splits HTML fragments into tokens, carrying unfinished input across fragments.
+#[derive(Debug, Default)]
+pub(super) struct Lexer {
+    /// An unfinished `<...` carried over until a later fragment closes it.
+    pending: String,
+    /// The element whose content is being dropped, until its closing tag.
+    skipping: Option<&'static str>,
+}
+
+/// A parsed tag: its lowercase name, whether it closes, and its raw attribute text.
+struct Tag<'a> {
+    name: String,
+    closing: bool,
+    attrs: &'a str,
+}
+
+impl Lexer {
+    pub(super) fn feed(&mut self, fragment: &str) -> Vec<Token> {
+        let mut tokens = Vec::new();
         let mut rest = std::mem::take(&mut self.pending);
         rest.push_str(fragment);
         let mut rest = rest.as_str();
         while let Some(start) = rest.find('<') {
-            self.text(&rest[..start]);
+            self.text(&rest[..start], &mut tokens);
             let from_tag = &rest[start..];
             if !starts_tag(from_tag) {
-                self.text("<");
+                self.text("<", &mut tokens);
                 rest = &from_tag[1..];
                 continue;
             }
@@ -89,58 +92,109 @@ impl HtmlTokenizer {
             }
             let Some(end) = tag_end(from_tag) else {
                 self.pending = from_tag.to_string();
-                return;
+                return tokens;
             };
             if let Some(tag) = parse_tag(&from_tag[1..end]) {
-                self.tag(&tag);
+                self.tag(&tag, &mut tokens);
             }
             rest = &from_tag[end + 1..];
         }
         let split = partial_entity_start(rest).unwrap_or(rest.len());
-        self.text(&rest[..split]);
+        self.text(&rest[..split], &mut tokens);
         self.pending = rest[split..].to_string();
+        tokens
     }
 
-    /// Closes every open element and returns the blocks. A tag left unfinished is dropped.
-    pub fn finish(mut self) -> Vec<Block> {
+    /// Flushes a trailing partial entity as text. A tag left unfinished is dropped.
+    pub(super) fn finish(&mut self) -> Vec<Token> {
+        let mut tokens = Vec::new();
         let pending = std::mem::take(&mut self.pending);
         if pending.starts_with('&') {
-            self.text(&pending);
+            self.text(&pending, &mut tokens);
         }
-        while self.stack.len() > 1 {
-            self.close();
-        }
-        match self.stack.pop() {
-            Some(Frame::Root(blocks)) => blocks,
-            _ => Vec::new(),
-        }
+        tokens
     }
 
-    fn tag(&mut self, tag: &Tag<'_>) {
+    fn tag(&mut self, tag: &Tag<'_>, tokens: &mut Vec<Token>) {
         if let Some(skipped) = self.skipping {
             if tag.closing && tag.name == skipped {
                 self.skipping = None;
             }
             return;
         }
-        if self.in_literal() && !self.closes_literal(tag) {
+        if tag.closing {
+            tokens.push(Token::Close(tag.name.clone()));
             return;
         }
-        if tag.closing {
-            self.close_tag(&tag.name);
+        if let Some(skipped) = SKIPPED_ELEMENTS
+            .iter()
+            .find(|skipped| **skipped == tag.name)
+        {
+            self.skipping = Some(skipped);
+            return;
+        }
+        let href = if tag.name == "a" {
+            attribute(tag.attrs, "href").and_then(|value| url(&value))
         } else {
-            self.open_tag(tag);
+            None
+        };
+        tokens.push(Token::Open {
+            name: tag.name.clone(),
+            href,
+        });
+    }
+
+    fn text(&self, text: &str, tokens: &mut Vec<Token>) {
+        if !text.is_empty() && self.skipping.is_none() {
+            tokens.push(Token::Text(decode_entities(text)));
+        }
+    }
+}
+
+impl Builder {
+    /// Feeds one HTML fragment; the elements it opens stay open for later events.
+    pub(super) fn html(&mut self, fragment: &str) {
+        let tokens = self.lexer.feed(fragment);
+        self.html_tokens(tokens);
+    }
+
+    pub(super) fn html_tokens(&mut self, tokens: Vec<Token>) {
+        for token in tokens {
+            match token {
+                Token::Text(text) => self.html_text(&text),
+                Token::Open { .. } | Token::Close(_) if self.skips_tag(&token) => {}
+                Token::Open { name, href } => self.open_tag(&name, href),
+                Token::Close(name) => self.close_tag(&name),
+            }
         }
     }
 
-    fn open_tag(&mut self, tag: &Tag<'_>) {
-        let name = tag.name.as_str();
+    /// Inside `pre` and `code` every tag is dropped except the one that closes it.
+    fn skips_tag(&self, token: &Token) -> bool {
+        let closes = match (self.stack.last(), token) {
+            (Some(Frame::Pre(_)), Token::Close(name)) => name == "pre",
+            (Some(Frame::InlineCode(_)), Token::Close(name)) => name == "code",
+            _ => false,
+        };
+        matches!(
+            self.stack.last(),
+            Some(Frame::Pre(_) | Frame::InlineCode(_))
+        ) && !closes
+    }
+
+    fn html_text(&mut self, text: &str) {
+        let loose = matches!(
+            self.stack.last(),
+            Some(Frame::Root(_) | Frame::Item(_) | Frame::Quote(_) | Frame::List(_))
+        );
+        if !(loose && text.trim().is_empty()) {
+            self.text(text);
+        }
+    }
+
+    fn open_tag(&mut self, name: &str, href: Option<String>) {
         if let Some(level) = heading_level(name) {
             self.open_block(Frame::Heading(level, Vec::new()));
-            return;
-        }
-        if let Some(skipped) = SKIPPED_ELEMENTS.iter().find(|skipped| **skipped == name) {
-            self.skipping = Some(skipped);
             return;
         }
         match name {
@@ -157,11 +211,8 @@ impl HtmlTokenizer {
             "em" => self.stack.push(Frame::Emphasis(Vec::new())),
             "strong" => self.stack.push(Frame::Strong(Vec::new())),
             "code" => self.stack.push(Frame::InlineCode(String::new())),
-            "a" => {
-                let href = attribute(tag.attrs, "href").and_then(|value| url(&value));
-                self.stack.push(Frame::Link(href, Vec::new()));
-            }
-            "br" => self.text("\n"),
+            "a" => self.stack.push(Frame::Link(href, Vec::new())),
+            "br" => self.html_text("\n"),
             _ => {}
         }
     }
@@ -208,12 +259,7 @@ impl HtmlTokenizer {
 
     /// Opens a list or quote, or flattens it into its parent past `MAX_NESTING`.
     fn open_container(&mut self, frame: Frame) {
-        let depth = self
-            .stack
-            .iter()
-            .filter(|open| matches!(open, Frame::List(_) | Frame::Quote(_)))
-            .count();
-        if depth >= MAX_NESTING {
+        if self.nesting() >= MAX_NESTING {
             self.flush_implicit_paragraph();
             self.flattened += 1;
         } else {
@@ -229,110 +275,6 @@ impl HtmlTokenizer {
 
     fn close_open_item(&mut self) {
         self.close_if(|frame| matches!(frame, Frame::Item(_)));
-    }
-
-    /// Closes the paragraph that text outside any paragraph tag opened.
-    fn flush_implicit_paragraph(&mut self) {
-        self.close_if(|frame| matches!(frame, Frame::Para(_)));
-    }
-
-    fn in_literal(&self) -> bool {
-        matches!(
-            self.stack.last(),
-            Some(Frame::Pre(_) | Frame::InlineCode(_))
-        )
-    }
-
-    /// Inside `pre` and `code` every tag is text except the one that closes it.
-    fn closes_literal(&self, tag: &Tag<'_>) -> bool {
-        tag.closing
-            && matches!(
-                (self.stack.last(), tag.name.as_str()),
-                (Some(Frame::Pre(_)), "pre") | (Some(Frame::InlineCode(_)), "code")
-            )
-    }
-
-    /// Pops the top frame and hands the finished element to its parent.
-    fn close(&mut self) {
-        if self.stack.len() < 2 {
-            return;
-        }
-        let Some(frame) = self.stack.pop() else {
-            return;
-        };
-        match frame {
-            Frame::Root(_) => {}
-            Frame::Item(blocks) => match self.stack.last_mut() {
-                Some(Frame::List(items)) => items.push(blocks),
-                _ => blocks.into_iter().for_each(|block| self.add_block(block)),
-            },
-            Frame::Quote(blocks) => self.add_block(Block::Quote(blocks)),
-            Frame::List(items) => self.add_block(Block::List(items)),
-            Frame::Para(content) => self.add_block(Block::Paragraph(content)),
-            Frame::Heading(level, content) => self.add_block(Block::Heading { level, content }),
-            Frame::Summary(content) => {
-                self.add_block(Block::Paragraph(vec![Inline::Strong(content)]));
-            }
-            Frame::Pre(text) => self.add_block(Block::Code {
-                lang: None,
-                text: clean(&text),
-            }),
-            Frame::Emphasis(content) => self.push_inline(Inline::Emphasis(content)),
-            Frame::Strong(content) => self.push_inline(Inline::Strong(content)),
-            Frame::Link(url, content) => self.push_inline(Inline::Link { url, content }),
-            Frame::InlineCode(text) => self.push_inline(Inline::Code(clean(&text))),
-        }
-    }
-
-    fn add_block(&mut self, block: Block) {
-        if let Some(Frame::Root(blocks) | Frame::Item(blocks) | Frame::Quote(blocks)) =
-            self.stack.last_mut()
-        {
-            blocks.push(block);
-        }
-    }
-
-    fn text(&mut self, text: &str) {
-        if text.is_empty() || self.skipping.is_some() {
-            return;
-        }
-        let decoded = decode_entities(text);
-        let text = decoded.as_str();
-        match self.stack.last_mut() {
-            Some(Frame::Pre(buffer) | Frame::InlineCode(buffer)) => buffer.push_str(text),
-            Some(Frame::Root(_) | Frame::Item(_) | Frame::Quote(_) | Frame::List(_))
-                if text.trim().is_empty() => {}
-            _ => self.push_inline(Inline::Text(clean(text))),
-        }
-    }
-
-    fn push_inline(&mut self, inline: Inline) {
-        if matches!(
-            self.stack.last(),
-            Some(Frame::Root(_) | Frame::Item(_) | Frame::Quote(_))
-        ) {
-            self.stack.push(Frame::Para(Vec::new()));
-        }
-        if let Some(inlines) = self.inlines_mut() {
-            match (inlines.last_mut(), inline) {
-                (Some(Inline::Text(last)), Inline::Text(next)) => last.push_str(&next),
-                (_, inline) => inlines.push(inline),
-            }
-        }
-    }
-
-    fn inlines_mut(&mut self) -> Option<&mut Vec<Inline>> {
-        match self.stack.last_mut() {
-            Some(
-                Frame::Para(inlines)
-                | Frame::Heading(_, inlines)
-                | Frame::Summary(inlines)
-                | Frame::Emphasis(inlines)
-                | Frame::Strong(inlines)
-                | Frame::Link(_, inlines),
-            ) => Some(inlines),
-            _ => None,
-        }
     }
 }
 
