@@ -301,12 +301,12 @@ fn code_lang(kind: &CodeBlockKind<'_>) -> Option<String> {
 }
 
 /// Sanitizes again at the leaf: numeric references decode after the first pass.
-fn clean(text: &str) -> String {
+pub(super) fn clean(text: &str) -> String {
     sanitize(text).as_str().to_string()
 }
 
 /// Keeps a URL only when its scheme, read with all whitespace and controls removed, is allowed.
-fn url(dest: &str) -> Option<String> {
+pub(super) fn url(dest: &str) -> Option<String> {
     let cleaned = clean(dest);
     let probe: String = cleaned
         .chars()
