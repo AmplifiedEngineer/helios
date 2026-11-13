@@ -42,6 +42,8 @@ pub const SCREEN_WIDTH: u16 = 99;
 /// Wide enough for the split panes.
 pub const WIDE_SCREEN_WIDTH: u16 = 120;
 pub const SCREEN_HEIGHT: u16 = 24;
+/// The first column inside the list pane's left border.
+const PANE_TEXT_COLUMN: usize = 1;
 const SETTLE_LIMIT: Duration = Duration::from_secs(10);
 const HOLD_POLL: Duration = Duration::from_millis(1);
 const SETTLE_POLL: Duration = Duration::from_millis(1);
@@ -359,7 +361,7 @@ impl Harness {
         buffer
             .content()
             .chunks(width)
-            .find(|row| row[0].modifier.contains(Modifier::REVERSED))
+            .find(|row| row[PANE_TEXT_COLUMN].modifier.contains(Modifier::REVERSED))
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .unwrap_or_default()
     }

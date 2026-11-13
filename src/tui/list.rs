@@ -19,6 +19,7 @@ use crate::sanitize::sanitize;
 const COLUMN_SPACING: u16 = 1;
 const MIN_TITLE_WIDTH: u16 = 30;
 const REPO_WIDTH: u16 = 24;
+const MIN_REPO_WIDTH: u16 = 12;
 const REPO_ELLIPSIS: char = '\u{2026}';
 
 /// A table column. The title takes the width the others leave.
@@ -90,19 +91,20 @@ impl Column {
         }
     }
 
-    fn constraint(self) -> Constraint {
+    fn constraint(self, repo_width: u16) -> Constraint {
         match self {
             Self::Title => Constraint::Fill(1),
+            Self::Repo => Constraint::Length(repo_width),
             other => Constraint::Length(other.width()),
         }
     }
 
-    fn cell(self, row: &PrSummary, now: SystemTime) -> String {
+    fn cell(self, row: &PrSummary, now: SystemTime, repo_width: u16) -> String {
         match self {
             Self::Host => sanitize(&row.key.host).to_string(),
             Self::Repo => trim_start(
                 &sanitize(&row.key.repo).to_string(),
-                usize::from(REPO_WIDTH),
+                usize::from(repo_width),
             ),
             Self::Number => format!("#{}", row.key.number),
             Self::Title => row.title.to_string(),
@@ -118,7 +120,10 @@ impl Column {
 
 /// Whether the column has no text on any of `rows`. With no rows nothing is hidden.
 fn is_blank_everywhere(column: Column, rows: &[&PrSummary], now: SystemTime) -> bool {
-    !rows.is_empty() && rows.iter().all(|row| column.cell(row, now).is_empty())
+    !rows.is_empty()
+        && rows
+            .iter()
+            .all(|row| column.cell(row, now, REPO_WIDTH).is_empty())
 }
 
 /// The columns that fit in `width`: the host only when rows come from more than one, no
@@ -140,7 +145,22 @@ fn visible_columns(
         let Some(dropped) = drops.next() else { break };
         columns.retain(|column| *column != dropped);
     }
+    if shortfall(&columns, width) > REPO_WIDTH - MIN_REPO_WIDTH {
+        columns.retain(|column| *column != Column::Updated);
+    }
     columns
+}
+
+/// How many columns the table is short of `width`, with every column at its full width.
+fn shortfall(columns: &[Column], width: u16) -> u16 {
+    needed_width(columns).saturating_sub(width)
+}
+
+/// The repo column gives up what the others still lack, down to its least width.
+fn repo_width(columns: &[Column], width: u16) -> u16 {
+    REPO_WIDTH
+        .saturating_sub(shortfall(columns, width))
+        .max(MIN_REPO_WIDTH)
 }
 
 fn needed_width(columns: &[Column]) -> u16 {
@@ -177,7 +197,10 @@ pub fn render_rows(
     let first_host = rows.first().map(|row| &row.key.host);
     let several_hosts = rows.iter().any(|row| Some(&row.key.host) != first_host);
     let columns = visible_columns(area.width, several_hosts, &rows, now);
-    let rows = rows.into_iter().map(|row| table_row(row, &columns, now));
+    let repo_width = repo_width(&columns, area.width);
+    let rows = rows
+        .into_iter()
+        .map(|row| table_row(row, &columns, now, repo_width));
     let mut failures: Vec<String> = app
         .host_failures()
         .iter()
@@ -189,10 +212,13 @@ pub fn render_rows(
     let failure_height = u16::try_from(failures.len()).unwrap_or(u16::MAX);
     let [table_area, failure_area] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(failure_height)]).areas(area);
-    let table = Table::new(rows, columns.iter().map(|column| column.constraint()))
-        .column_spacing(COLUMN_SPACING)
-        .header(Row::new(columns.iter().map(|column| column.header())))
-        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+    let table = Table::new(
+        rows,
+        columns.iter().map(|column| column.constraint(repo_width)),
+    )
+    .column_spacing(COLUMN_SPACING)
+    .header(Row::new(columns.iter().map(|column| column.header())))
+    .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
     let mut state = TableState::default().with_selected(selected);
     frame.render_stateful_widget(table, table_area, &mut state);
     frame.render_widget(Paragraph::new(failures.join("\n")), failure_area);
@@ -213,8 +239,17 @@ pub(crate) fn failure_message(error: &GithubError) -> &'static str {
     }
 }
 
-fn table_row(row: &PrSummary, columns: &[Column], now: SystemTime) -> Row<'static> {
-    Row::new(columns.iter().map(|column| column.cell(row, now)))
+fn table_row(
+    row: &PrSummary,
+    columns: &[Column],
+    now: SystemTime,
+    repo_width: u16,
+) -> Row<'static> {
+    Row::new(
+        columns
+            .iter()
+            .map(|column| column.cell(row, now, repo_width)),
+    )
 }
 
 fn tags_text(tags: &[Tag]) -> String {

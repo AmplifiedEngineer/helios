@@ -21,6 +21,9 @@ const WIDTH: u16 = 100;
 const HEIGHT: u16 = 16;
 const HOST: &str = "github.com";
 const ACCOUNT: &str = "octo";
+const BORDER_WIDTH: usize = 1;
+const BORDER_LINE: char = '─';
+const PLAIN_TITLE: &str = "[Mine]  Needs me";
 
 fn row(number: u64, title: &str) -> PrSummary {
     PrSummary {
@@ -258,5 +261,18 @@ fn a_loaded_list_shows_no_spinner_and_a_tick_changes_nothing() {
     // Assert
     assert!(!app.is_loading());
     assert_eq!(before, after);
-    assert_eq!(header_of(&after).trim_end(), "[Mine]  Needs me");
+    let title: String = header_of(&after)
+        .chars()
+        .skip(BORDER_WIDTH)
+        .take(PLAIN_TITLE.chars().count())
+        .collect();
+    assert_eq!(title, PLAIN_TITLE);
+    let after_title = header_of(&after)
+        .chars()
+        .nth(BORDER_WIDTH + PLAIN_TITLE.chars().count());
+    assert_eq!(
+        after_title,
+        Some(BORDER_LINE),
+        "something follows the title"
+    );
 }
