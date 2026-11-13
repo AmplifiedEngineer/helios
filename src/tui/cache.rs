@@ -5,17 +5,19 @@ use std::collections::{HashMap, VecDeque};
 
 use ratatui::text::Line;
 
+use crate::theme::Theme;
+
 /// The most rendered items the cache keeps for the selected pull request.
 pub const MAX_CACHE_ENTRIES: usize = 2048;
 
-/// Rendered lines of the selected pull request, keyed by item, content hash and width.
+/// Rendered lines of the selected pull request, keyed by item, content hash, width and theme.
 pub struct RenderCache {
     capacity: usize,
     state: RefCell<State>,
     builds: Cell<usize>,
 }
 
-type Key = (String, u64, u16);
+type Key = (String, u64, u16, Theme);
 
 #[derive(Default)]
 struct State {
@@ -56,9 +58,10 @@ impl RenderCache {
         item: &str,
         content_hash: u64,
         width: u16,
+        theme: Theme,
         build: impl FnOnce() -> Vec<Line<'static>>,
     ) -> Vec<Line<'static>> {
-        let key = (item.to_string(), content_hash, width);
+        let key = (item.to_string(), content_hash, width, theme);
         {
             let mut state = self.state.borrow_mut();
             if state.pr_key != pr_key {
@@ -98,10 +101,33 @@ mod tests {
     use super::*;
 
     fn fetch(cache: &RenderCache, item: &str, builds: &Cell<u32>) -> Vec<Line<'static>> {
-        cache.lines("pr", item, 1, 80, || {
+        cache.lines("pr", item, 1, 80, Theme::Standard, || {
             builds.set(builds.get() + 1);
             vec![Line::from(item.to_string())]
         })
+    }
+
+    #[test]
+    fn a_changed_theme_builds_again() {
+        // Arrange
+        let cache = RenderCache::new();
+        let builds = Cell::new(0);
+        let build = |theme| {
+            cache.lines("pr", "a", 1, 80, theme, || {
+                builds.set(builds.get() + 1);
+                vec![Line::from("a")]
+            })
+        };
+        build(Theme::Standard);
+
+        // Act
+        build(Theme::Standard);
+        let after_same = builds.get();
+        build(Theme::Dark);
+
+        // Assert
+        assert_eq!(after_same, 1, "the same theme stays cached");
+        assert_eq!(builds.get(), 2, "another theme builds again");
     }
 
     #[test]

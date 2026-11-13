@@ -138,6 +138,11 @@ pub const BINDINGS: &[Binding] = &[
         scopes: &[Scope::Detail, Scope::Files],
     },
     Binding {
+        key: "t",
+        action: "theme",
+        scopes: ANYWHERE,
+    },
+    Binding {
         key: "o",
         action: "open in browser",
         scopes: ANYWHERE,
@@ -204,6 +209,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Outcome {
             return Outcome::Continue;
         }
         KeyCode::Char('o') => return Outcome::OpenInBrowser,
+        KeyCode::Char('t') => {
+            app.cycle_theme();
+            return Outcome::Continue;
+        }
         _ => {}
     }
     match Scope::of(app) {

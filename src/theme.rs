@@ -10,7 +10,7 @@ const TERM_256_MARK: &str = "256color";
 const NO_COLOR_VAR: &str = "NO_COLOR";
 
 /// A color theme. `t` cycles them in the order of `ALL`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Theme {
     #[default]
     Standard,
@@ -51,8 +51,9 @@ impl Theme {
 }
 
 /// How many colors the terminal can show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorDepth {
+    #[default]
     TrueColor,
     Ansi256,
     Ansi16,

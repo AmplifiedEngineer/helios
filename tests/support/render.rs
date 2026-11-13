@@ -3,6 +3,13 @@
 //! Turns a test terminal buffer into text a test can search.
 
 use ratatui::buffer::Buffer;
+use ratatui::style::Color;
+
+/// The foreground and background of the cell at `x`, `y`.
+pub fn cell_colors(buffer: &Buffer, x: u16, y: u16) -> (Color, Color) {
+    let cell = &buffer[(x, y)];
+    (cell.fg, cell.bg)
+}
 
 /// The buffer as lines, each without its trailing blanks.
 pub fn buffer_text(buffer: &Buffer) -> String {

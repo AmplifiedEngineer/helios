@@ -6,8 +6,8 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Paragraph, Row, Table, TableState};
+use ratatui::style::Style;
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::app::refresh::Clock;
@@ -15,6 +15,7 @@ use crate::app::App;
 use crate::github::errors::GithubError;
 use crate::model::{CheckState, PrSummary, ReviewDecision, Tag};
 use crate::sanitize::sanitize;
+use crate::tui::style::Styles;
 
 const COLUMN_SPACING: u16 = 1;
 const MIN_TITLE_WIDTH: u16 = 30;
@@ -116,6 +117,25 @@ impl Column {
             Self::Updated => age_since(row.updated_at, now),
         }
     }
+
+    /// The color of the cell: the status columns carry their state's color.
+    fn style(self, row: &PrSummary, styles: &Styles) -> Style {
+        match self {
+            Self::Checks => match row.check_state {
+                Some(CheckState::Success) => styles.check_pass,
+                Some(CheckState::Failure | CheckState::Error) => styles.check_fail,
+                Some(CheckState::Pending | CheckState::Expected) => styles.check_pending,
+                Some(CheckState::Unknown(_)) | None => Style::new(),
+            },
+            Self::Review => match row.review_decision {
+                Some(ReviewDecision::Approved) => styles.review_approved,
+                Some(ReviewDecision::ChangesRequested) => styles.review_changes,
+                Some(ReviewDecision::ReviewRequired) => styles.review_required,
+                Some(ReviewDecision::Unknown(_)) | None => Style::new(),
+            },
+            _ => Style::new(),
+        }
+    }
 }
 
 /// Whether the column has no text on any of `rows`. With no rows nothing is hidden.
@@ -198,9 +218,10 @@ pub fn render_rows(
     let several_hosts = rows.iter().any(|row| Some(&row.key.host) != first_host);
     let columns = visible_columns(area.width, several_hosts, &rows, now);
     let repo_width = repo_width(&columns, area.width);
+    let styles = Styles::of(app);
     let rows = rows
         .into_iter()
-        .map(|row| table_row(row, &columns, now, repo_width));
+        .map(|row| table_row(row, &columns, now, repo_width, &styles));
     let mut failures: Vec<String> = app
         .host_failures()
         .iter()
@@ -218,10 +239,13 @@ pub fn render_rows(
     )
     .column_spacing(COLUMN_SPACING)
     .header(Row::new(columns.iter().map(|column| column.header())))
-    .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+    .row_highlight_style(styles.selection);
     let mut state = TableState::default().with_selected(selected);
     frame.render_stateful_widget(table, table_area, &mut state);
-    frame.render_widget(Paragraph::new(failures.join("\n")), failure_area);
+    frame.render_widget(
+        Paragraph::new(failures.join("\n")).style(styles.error),
+        failure_area,
+    );
 }
 
 /// A fixed message per failure kind, so no text from GitHub reaches the screen.
@@ -244,12 +268,11 @@ fn table_row(
     columns: &[Column],
     now: SystemTime,
     repo_width: u16,
+    styles: &Styles,
 ) -> Row<'static> {
-    Row::new(
-        columns
-            .iter()
-            .map(|column| column.cell(row, now, repo_width)),
-    )
+    Row::new(columns.iter().map(|column| {
+        Cell::new(column.cell(row, now, repo_width)).style(column.style(row, styles))
+    }))
 }
 
 fn tags_text(tags: &[Tag]) -> String {

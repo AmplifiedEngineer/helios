@@ -12,6 +12,7 @@ use helios::cli::{self, Config, DebugHooks};
 use helios::github::clients::{build_clients, Client, ClientsError};
 use helios::github::octo::{Octo, REQUEST_TIMEOUT};
 use helios::smoke::{self, SmokeAccount};
+use helios::theme::{effective_theme, ColorDepth, Theme};
 use helios::tui::run::{Session, TerminalEvents};
 use helios::tui::{self, SystemClock};
 
@@ -29,6 +30,9 @@ fn run(config: &Config, hooks: DebugHooks) -> io::Result<()> {
     tui::install_panic_hook();
     let runtime = tokio::runtime::Runtime::new()?;
     let mut app = App::new();
+    let lookup = |name: &str| std::env::var(name).ok();
+    app.set_depth(ColorDepth::detect(lookup));
+    app.set_theme(effective_theme(Theme::default(), lookup));
     app.show_drafts = config.drafts;
     let clients = if hooks.fake_accounts {
         Vec::new()

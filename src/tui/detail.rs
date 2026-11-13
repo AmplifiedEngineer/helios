@@ -6,8 +6,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
@@ -20,10 +19,12 @@ use crate::model::{
     PrKey, PrState, ReviewDecision, Shown,
 };
 use crate::remote::Remote;
+use crate::theme::Theme;
 use crate::tui::cache::RenderCache;
 use crate::tui::diff::{count_changes, inline_lines};
 use crate::tui::list::{age_since, failure_message};
 use crate::tui::markdown::render as render_markdown;
+use crate::tui::style::Styles;
 
 const COMMENTS_HEADING: &str = "Issue comments";
 const THREADS_HEADING: &str = "Review threads";
@@ -56,6 +57,7 @@ struct Bodies<'a> {
     cache: &'a RenderCache,
     pr_key: String,
     width: u16,
+    theme: Theme,
 }
 
 impl Bodies<'_> {
@@ -65,11 +67,14 @@ impl Bodies<'_> {
         body.as_str().hash(&mut hasher);
         let indent_width = u16::try_from(indent.chars().count()).unwrap_or(u16::MAX);
         let width = self.width.saturating_sub(indent_width);
-        let lines = self
-            .cache
-            .lines(&self.pr_key, item, hasher.finish(), width, || {
-                render_markdown(&from_remote(body), width)
-            });
+        let lines = self.cache.lines(
+            &self.pr_key,
+            item,
+            hasher.finish(),
+            width,
+            self.theme,
+            || render_markdown(&from_remote(body), width),
+        );
         if indent.is_empty() {
             return lines;
         }
@@ -95,11 +100,13 @@ pub fn render_cached(
         cache,
         pr_key: app.selected.as_ref().map(pr_key_text).unwrap_or_default(),
         width: area.width,
+        theme: app.theme(),
     };
+    let styles = Styles::of(app);
     let mut cursor_line = 0;
     let lines = match app.detail() {
         DetailState::Loading => vec![Line::from(LOADING_TEXT)],
-        DetailState::Failed(error) => vec![Line::from(failure_message(error))],
+        DetailState::Failed(error) => vec![Line::styled(failure_message(error), styles.error)],
         DetailState::Loaded(detail) => match app.tab {
             DetailTab::Overview => overview_lines(detail, &bodies),
             DetailTab::Conversation => conversation_lines(detail, clock, &bodies),
@@ -109,7 +116,7 @@ pub fn render_cached(
                 commit_lines(&detail.commits, clock),
             ),
             DetailTab::Files => {
-                let drawn = file_lines(app, area.width);
+                let drawn = file_lines(app, area.width, &styles);
                 cursor_line = drawn.cursor_line;
                 drawn.lines
             }
@@ -225,9 +232,9 @@ impl FileLines {
     }
 }
 
-fn file_lines(app: &App, width: u16) -> FileLines {
+fn file_lines(app: &App, width: u16, styles: &Styles) -> FileLines {
     if let Some(error) = app.files_failure() {
-        return FileLines::only(Line::from(failure_message(error)));
+        return FileLines::only(Line::styled(failure_message(error), styles.error));
     }
     let Some(files) = app.files() else {
         return FileLines::only(Line::from(FILES_LOADING_TEXT));
@@ -253,10 +260,10 @@ fn file_lines(app: &App, width: u16) -> FileLines {
         }
         let indent = if in_tests { TEST_INDENT } else { "" };
         let mut open_file = None;
-        let text = match row {
+        let line = match row {
             FileRow::Tests(count) => {
                 in_tests = true;
-                tests_row_text(count, app.tests_open())
+                Line::from(tests_row_text(count, app.tests_open()))
             }
             FileRow::File(index) => {
                 let Some(file) = files.get(index) else {
@@ -264,12 +271,11 @@ fn file_lines(app: &App, width: u16) -> FileLines {
                 };
                 let open = app.is_file_open(index);
                 open_file = open.then_some(file);
-                file_row_text(file, open, indent)
+                file_row_line(file, open, indent, styles)
             }
         };
-        let line = Line::from(text);
         lines.push(if position == cursor {
-            line.style(Style::new().add_modifier(Modifier::REVERSED))
+            line.style(styles.selection)
         } else {
             line
         });
@@ -294,17 +300,21 @@ fn tests_row_text(count: usize, open: bool) -> String {
 }
 
 /// One file row: the marker, the path, the marks, then the `+added -removed` counts.
-fn file_row_text(file: &ChangedFile, open: bool, indent: &str) -> String {
+fn file_row_line(file: &ChangedFile, open: bool, indent: &str, styles: &Styles) -> Line<'static> {
     let marks = file_marks(file);
     let mut text = format!("{indent}{} {}", marker(open), file.path);
     if !marks.is_empty() {
         text.push_str(&format!(" [{}]", marks.join(", ")));
     }
+    let mut spans = vec![Span::raw(text)];
     if let FileDiff::Patch(patch) = &file.diff {
         let (added, removed) = count_changes(patch.as_str());
-        text.push_str(&format!("{COUNTS_GAP}+{added} -{removed}"));
+        spans.push(Span::raw(COUNTS_GAP));
+        spans.push(Span::styled(format!("+{added}"), styles.added));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("-{removed}"), styles.removed));
     }
-    text
+    Line::from(spans)
 }
 
 fn file_marks(file: &ChangedFile) -> Vec<String> {

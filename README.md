@@ -52,6 +52,7 @@ The footer shows the keys that work on the screen you are on. `?` opens the same
 | `d` | toggle drafts |
 | `Tab` | next tab |
 | `Shift-Tab` | previous tab |
+| `t` | switch the color theme: default, spectrum, dark, light or mono |
 | `o` | open the pull request in the browser |
 | `?` | help |
 | `q` | quit |
