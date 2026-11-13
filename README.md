@@ -40,8 +40,8 @@ The footer shows the keys that work on the screen you are on. `?` opens the same
 |-----|--------|
 | `j/k` | move, or scroll a diff or a long tab. The arrow keys work too. |
 | `g/G` | first or last |
-| `Enter` | open the pull request, or the file diff on the Files tab |
-| `Esc` | back. `Backspace` works too. |
+| `Enter/l` | open the pull request, or the file diff on the Files tab |
+| `Esc/h` | back. `Backspace` works too. |
 | `m` | switch between Mine and Needs me |
 | `r` | refresh |
 | `f` | filter Needs me: all, review or assigned |

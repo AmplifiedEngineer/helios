@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::app::{App, DetailTab, ListView, Screen, Step};
+use crate::app::{App, DetailTab, ListView, Pane, Screen, Step};
 
 const FOOTER_SEPARATOR: &str = "  ";
 
@@ -24,7 +24,10 @@ pub enum Scope {
 impl Scope {
     /// The scope the app is in now.
     pub fn of(app: &App) -> Self {
+        let detail_focused = app.is_split() && app.pane == Pane::Detail;
         match (app.screen, app.view, app.tab) {
+            (Screen::List, _, DetailTab::Files) if detail_focused => Self::Files,
+            (Screen::List, _, _) if detail_focused => Self::Detail,
             (Screen::List, ListView::Mine, _) => Self::Mine,
             (Screen::List, ListView::NeedsMe, _) => Self::NeedsMe,
             (Screen::Detail, _, DetailTab::Files) => Self::Files,
@@ -75,12 +78,12 @@ pub const BINDINGS: &[Binding] = &[
         ],
     },
     Binding {
-        key: "Enter",
+        key: "Enter/l",
         action: "open",
         scopes: &[Scope::Mine, Scope::NeedsMe, Scope::Files],
     },
     Binding {
-        key: "Esc",
+        key: "Esc/h",
         action: "back",
         scopes: &[Scope::Detail, Scope::Files, Scope::Diff],
     },
@@ -158,7 +161,11 @@ fn step_for(code: KeyCode) -> Option<Step> {
 }
 
 fn is_back(code: KeyCode) -> bool {
-    matches!(code, KeyCode::Esc | KeyCode::Backspace)
+    matches!(code, KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('h'))
+}
+
+fn is_open(code: KeyCode) -> bool {
+    matches!(code, KeyCode::Enter | KeyCode::Char('l'))
 }
 
 /// Applies one key press to the app.
@@ -192,7 +199,7 @@ fn list_key(app: &mut App, code: KeyCode) -> Outcome {
         return Outcome::Continue;
     }
     match code {
-        KeyCode::Enter => app.open_highlighted(),
+        code if is_open(code) => app.open_highlighted(),
         KeyCode::Char('m') => app.toggle_view(),
         KeyCode::Char('r') => return Outcome::Refresh,
         KeyCode::Char('f') if app.view == ListView::NeedsMe => app.cycle_filter(),
@@ -207,7 +214,7 @@ fn detail_key(app: &mut App, code: KeyCode) -> Outcome {
     match code {
         KeyCode::Tab => app.next_tab(),
         KeyCode::BackTab => app.previous_tab(),
-        KeyCode::Enter if on_files => app.open_file(),
+        code if is_open(code) && on_files => app.open_file(),
         code if is_back(code) => app.back(),
         code if on_files => {
             if let Some(step) = step_for(code) {

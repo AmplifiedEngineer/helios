@@ -34,7 +34,8 @@ use super::render::buffer_text;
 pub const HOST: &str = "github.com";
 pub const LOGIN: &str = "octo";
 pub const REPO: &str = "org/repo";
-pub const SCREEN_WIDTH: u16 = 120;
+/// One column under the split width, so the loop tests keep the single-pane flow.
+pub const SCREEN_WIDTH: u16 = 99;
 pub const SCREEN_HEIGHT: u16 = 24;
 const SETTLE_LIMIT: Duration = Duration::from_secs(10);
 const HOLD_POLL: Duration = Duration::from_millis(1);

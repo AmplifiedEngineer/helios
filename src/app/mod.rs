@@ -25,6 +25,14 @@ pub enum Screen {
     Diff,
 }
 
+/// The pane that has the keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pane {
+    #[default]
+    List,
+    Detail,
+}
+
 /// Which list the list screen shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ListView {
@@ -101,6 +109,9 @@ impl ListFilter {
 #[derive(Debug, Default)]
 pub struct App {
     pub screen: Screen,
+    /// The focused pane; it only matters while the screen is split.
+    pub pane: Pane,
+    split: bool,
     pub selected: Option<PrKey>,
     pub filter: ListFilter,
     pub show_drafts: bool,
@@ -161,6 +172,19 @@ impl DetailTab {
 impl App {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Tells the app whether the terminal is wide enough to show both panes.
+    pub fn set_split(&mut self, split: bool) {
+        self.split = split;
+        if !split {
+            self.pane = Pane::List;
+        }
+    }
+
+    /// Whether the list and detail panes show side by side.
+    pub fn is_split(&self) -> bool {
+        self.split
     }
 
     /// Starts a refresh and returns its generation.

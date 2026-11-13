@@ -21,6 +21,7 @@ use crate::github::GithubApi;
 use crate::tui::cache::RenderCache;
 use crate::tui::draw::draw_cached;
 use crate::tui::keys::{handle_key, Outcome};
+use crate::tui::layout::{is_split, LayoutSettings};
 
 /// How long one step waits for a key before it looks at the background results again.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -176,8 +177,22 @@ where
         Ok(flow)
     }
 
+    /// Sets the split flag from `width`, or from the terminal's current width when unknown.
+    fn sync_split(&mut self, width: Option<u16>) {
+        let width = width.or_else(|| self.terminal.size().ok().map(|size| size.width));
+        if let Some(width) = width {
+            self.app
+                .set_split(is_split(width, &LayoutSettings::default()));
+        }
+    }
+
     fn handle_event(&mut self, event: Event) -> Flow {
         self.dirty = true;
+        let resized = match event {
+            Event::Resize(width, _) => Some(width),
+            _ => None,
+        };
+        self.sync_split(resized);
         let Event::Key(key) = event else {
             return Flow::Running;
         };

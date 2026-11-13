@@ -2,7 +2,7 @@
 REPO                     #    ┌Keys──────────────────────────────────┐         AUTHOR       UPDATED
 org/repo                 #1   │j/k move                              │         octo         2h
 org/repo                 #2   │g/G first/last                        │         octo         2h
-                              │Enter open                            │
+                              │Enter/l open                          │
                               │m mine/needs me                       │
                               │r refresh                             │
                               │d toggle drafts                       │
@@ -12,5 +12,5 @@ org/repo                 #2   │g/G first/last                        │      
                               │Ctrl-C quit                           │
                               └──────────────────────────────────────┘
 
-j/k move  g/G first/last  Enter open  m mine/needs me  r refresh  d toggle drafts  o open in browser
-? help  q quit  Ctrl-C quit
+j/k move  g/G first/last  Enter/l open  m mine/needs me  r refresh  d toggle drafts
+o open in browser  ? help  q quit  Ctrl-C quit
