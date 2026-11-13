@@ -5,6 +5,7 @@ pub mod app;
 pub mod browser;
 pub mod cli;
 pub mod github;
+pub mod highlight;
 pub mod markdown;
 pub mod model;
 pub mod proc;
