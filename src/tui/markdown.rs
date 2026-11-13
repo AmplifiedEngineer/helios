@@ -5,7 +5,10 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::highlight::highlight;
 use crate::markdown::{Block, Document, Inline, Table};
+use crate::theme::{ColorDepth, Theme};
+use crate::tui::style::Styles;
 
 const BULLET_MARKER: &str = "- ";
 const ORDERED_SUFFIX: &str = ". ";
@@ -32,7 +35,16 @@ type Cell = (char, Style);
 ///
 /// Widths count terminal columns, so wide glyphs wrap correctly.
 pub fn render(document: &Document, width: u16) -> Vec<Line<'static>> {
-    let mut lines = render_blocks(&document.blocks, usize::from(width).max(1));
+    render_styled(
+        document,
+        width,
+        &Styles::new(Theme::Mono, ColorDepth::Ansi16),
+    )
+}
+
+/// Renders like `render`, coloring fenced code by token role.
+pub fn render_styled(document: &Document, width: u16, styles: &Styles) -> Vec<Line<'static>> {
+    let mut lines = render_blocks(&document.blocks, usize::from(width).max(1), styles);
     if document.cut {
         if !lines.is_empty() {
             lines.push(Line::default());
@@ -45,18 +57,18 @@ pub fn render(document: &Document, width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_blocks(blocks: &[Block], width: usize) -> Vec<Line<'static>> {
+fn render_blocks(blocks: &[Block], width: usize, styles: &Styles) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
             out.push(Line::default());
         }
-        out.extend(render_block(block, width));
+        out.extend(render_block(block, width, styles));
     }
     out
 }
 
-fn render_block(block: &Block, width: usize) -> Vec<Line<'static>> {
+fn render_block(block: &Block, width: usize, styles: &Styles) -> Vec<Line<'static>> {
     match block {
         Block::Paragraph(content) => wrap_inlines(content, Style::default(), width),
         Block::Heading { content, .. } => wrap_inlines(
@@ -64,29 +76,61 @@ fn render_block(block: &Block, width: usize) -> Vec<Line<'static>> {
             Style::default().add_modifier(Modifier::BOLD),
             width,
         ),
-        Block::List(items) => render_list(items, width, |_| BULLET_MARKER.to_string()),
-        Block::OrderedList(items) => render_list(items, width, |index| {
+        Block::List(items) => render_list(items, width, styles, |_| BULLET_MARKER.to_string()),
+        Block::OrderedList(items) => render_list(items, width, styles, |index| {
             format!("{}{ORDERED_SUFFIX}", index + 1)
         }),
         Block::Quote(inner) => {
             let inner_width = width.saturating_sub(QUOTE_BAR.len()).max(1);
-            render_blocks(inner, inner_width)
+            render_blocks(inner, inner_width, styles)
                 .into_iter()
                 .map(|line| prefixed(QUOTE_BAR, line))
                 .collect()
         }
-        Block::Code { text, .. } => text
-            .lines()
-            .map(|line| Line::from(format!("{CODE_INDENT}{line}")))
-            .collect(),
+        Block::Code { lang, text } => render_code(lang.as_deref(), text, styles),
         Block::Table(table) => render_table(table),
         Block::Rule => vec![Line::from(RULE_CHAR.to_string().repeat(width))],
+    }
+}
+
+/// Draws a code block; a known language colors each token by its role.
+fn render_code(lang: Option<&str>, text: &str, styles: &Styles) -> Vec<Line<'static>> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut rows = lang
+        .map(|lang| highlight(lang, &lines))
+        .unwrap_or_default()
+        .into_iter();
+    lines
+        .iter()
+        .map(|line| {
+            let mut spans = Vec::new();
+            push_span(&mut spans, CODE_INDENT, Style::default());
+            match rows.next() {
+                Some(row) if !row.is_empty() => {
+                    for (role, range) in row {
+                        let piece = line.get(range).unwrap_or_default();
+                        push_span(&mut spans, piece, styles.role(role));
+                    }
+                }
+                _ => push_span(&mut spans, line, Style::default()),
+            }
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// Appends text to the spans, joining it to the last span when the style matches.
+fn push_span(spans: &mut Vec<Span<'static>>, text: &str, style: Style) {
+    match spans.last_mut() {
+        Some(last) if last.style == style => last.content.to_mut().push_str(text),
+        _ => spans.push(Span::styled(text.to_string(), style)),
     }
 }
 
 fn render_list(
     items: &[Vec<Block>],
     width: usize,
+    styles: &Styles,
     marker: impl Fn(usize) -> String,
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
@@ -95,7 +139,10 @@ fn render_list(
         let marker_width = marker.chars().count();
         let inner_width = width.saturating_sub(marker_width).max(1);
         let hanging = " ".repeat(marker_width);
-        for (line_index, line) in render_item(item, inner_width).into_iter().enumerate() {
+        for (line_index, line) in render_item(item, inner_width, styles)
+            .into_iter()
+            .enumerate()
+        {
             let prefix = if line_index == 0 { &marker } else { &hanging };
             out.push(prefixed(prefix, line));
         }
@@ -104,7 +151,7 @@ fn render_list(
 }
 
 /// Renders one list item; a list nested in it is pushed right by `NESTED_LIST_INDENT`.
-fn render_item(item: &[Block], width: usize) -> Vec<Line<'static>> {
+fn render_item(item: &[Block], width: usize, styles: &Styles) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     for (index, block) in item.iter().enumerate() {
         if index > 0 {
@@ -115,12 +162,12 @@ fn render_item(item: &[Block], width: usize) -> Vec<Line<'static>> {
             let inner = width.saturating_sub(NESTED_LIST_INDENT).max(1);
             let pad = " ".repeat(NESTED_LIST_INDENT);
             out.extend(
-                render_block(block, inner)
+                render_block(block, inner, styles)
                     .into_iter()
                     .map(|line| prefixed(&pad, line)),
             );
         } else {
-            out.extend(render_block(block, width));
+            out.extend(render_block(block, width, styles));
         }
     }
     out

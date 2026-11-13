@@ -23,7 +23,7 @@ use crate::theme::Theme;
 use crate::tui::cache::RenderCache;
 use crate::tui::diff::{count_changes, inline_lines};
 use crate::tui::list::{age_since, failure_message};
-use crate::tui::markdown::render as render_markdown;
+use crate::tui::markdown::render_styled as render_markdown;
 use crate::tui::style::Styles;
 
 const COMMENTS_HEADING: &str = "Issue comments";
@@ -58,6 +58,7 @@ struct Bodies<'a> {
     pr_key: String,
     width: u16,
     theme: Theme,
+    styles: Styles,
 }
 
 impl Bodies<'_> {
@@ -73,7 +74,7 @@ impl Bodies<'_> {
             hasher.finish(),
             width,
             self.theme,
-            || render_markdown(&from_remote(body), width),
+            || render_markdown(&from_remote(body), width, &self.styles),
         );
         if indent.is_empty() {
             return lines;
@@ -96,13 +97,14 @@ pub fn render_cached(
     clock: &impl Clock,
     cache: &RenderCache,
 ) {
+    let styles = Styles::of(app);
     let bodies = Bodies {
         cache,
         pr_key: app.selected.as_ref().map(pr_key_text).unwrap_or_default(),
         width: area.width,
         theme: app.theme(),
+        styles,
     };
-    let styles = Styles::of(app);
     let mut cursor_line = 0;
     let lines = match app.detail() {
         DetailState::Loading => vec![Line::from(LOADING_TEXT)],

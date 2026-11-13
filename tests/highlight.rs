@@ -174,3 +174,20 @@ fn unbalanced_input_returns_one_role_row_per_line_with_the_same_text() {
         }
     }
 }
+
+#[test]
+fn jsx_and_tsx_map_to_their_base_language() {
+    // Arrange
+    let line = "const a = <div className=\"x\">{1}</div>;";
+    let tokens = ["jsx", "tsx", "src/App.jsx", "src/App.tsx"];
+
+    for token in tokens {
+        // Act
+        let rows = highlight(token, &[line]);
+
+        // Assert
+        let found = spans(line, &rows[0]);
+        assert!(!is_plain(&rows[0]), "{token}: {found:?}");
+        assert!(has(&found, Role::Keyword, "const"), "{token}: {found:?}");
+    }
+}

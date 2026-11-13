@@ -57,20 +57,29 @@ fn plain(line: &str) -> LineRoles {
     }
 }
 
+/// The grammar set has no JSX syntax, so JSX names fall back to JavaScript.
+fn base_name(name: &str) -> &str {
+    if name == "jsx" {
+        "js"
+    } else {
+        name
+    }
+}
+
 fn find_syntax(language_or_path: &str) -> Option<&'static SyntaxReference> {
     let set = syntaxes();
     let path = Path::new(language_or_path);
     let by_extension = || {
         path.extension()
             .and_then(|ext| ext.to_str())
-            .and_then(|ext| set.find_syntax_by_extension(ext))
+            .and_then(|ext| set.find_syntax_by_extension(base_name(ext)))
     };
     let by_file_name = || {
         path.file_name()
             .and_then(|name| name.to_str())
             .and_then(|name| set.find_syntax_by_extension(name))
     };
-    set.find_syntax_by_token(language_or_path)
+    set.find_syntax_by_token(base_name(language_or_path))
         .or_else(by_extension)
         .or_else(by_file_name)
 }
