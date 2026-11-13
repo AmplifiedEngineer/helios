@@ -5,6 +5,7 @@ pub mod detail;
 pub mod diff;
 pub mod draw;
 pub mod keys;
+pub mod layout;
 pub mod list;
 pub mod markdown;
 pub mod mine;
