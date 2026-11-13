@@ -40,7 +40,11 @@ The footer shows the keys that work on the screen you are on. `?` opens the same
 |-----|--------|
 | `j/k` | move, or scroll a diff or a long tab. The arrow keys work too. |
 | `g/G` | first or last |
-| `Enter/l` | open the pull request, or the file diff on the Files tab |
+| `Enter/l` | open the pull request |
+| `Enter/Space` | open or close the file under the cursor on the Files tab |
+| `e/E` | open or close every file on the Files tab |
+| `x` | open or close the tests group on the Files tab |
+| `v` | open the full-screen diff of the file under the cursor |
 | `Esc/h` | back. `Backspace` works too. |
 | `m` | switch between Mine and Needs me |
 | `r` | refresh |
