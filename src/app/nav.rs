@@ -71,12 +71,14 @@ impl App {
     pub fn move_cursor(&mut self, step: Step) {
         let landed = step.land(self.list_cursor(), self.list_rows().len());
         *self.cursor_slot() = landed;
+        self.cursor_moved = true;
     }
 
     /// Switches between the Mine and Needs me lists, with the cursor on the first row.
     pub fn toggle_view(&mut self) {
         self.view = self.view.other();
         *self.cursor_slot() = 0;
+        self.cursor_moved = true;
     }
 
     /// Runs `change`, then puts the list cursor back on the row it was on, when that row remains.

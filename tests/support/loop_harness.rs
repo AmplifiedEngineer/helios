@@ -8,6 +8,7 @@
 use std::collections::VecDeque;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -16,6 +17,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use helios::app::loader::{Loader, Source};
 use helios::app::refresh::Clock;
+use helios::app::worker::Message;
 use helios::app::App;
 use helios::github::errors::GithubError;
 use helios::github::queries::{FilesListing, ListKind, Listing};
@@ -35,7 +37,10 @@ pub const HOST: &str = "github.com";
 pub const LOGIN: &str = "octo";
 pub const REPO: &str = "org/repo";
 /// One column under the split width, so the loop tests keep the single-pane flow.
+/// A later change to the pane drawing revisits this width.
 pub const SCREEN_WIDTH: u16 = 99;
+/// Wide enough for the split panes.
+pub const WIDE_SCREEN_WIDTH: u16 = 120;
 pub const SCREEN_HEIGHT: u16 = 24;
 const SETTLE_LIMIT: Duration = Duration::from_secs(10);
 const HOLD_POLL: Duration = Duration::from_millis(1);
@@ -45,6 +50,11 @@ pub fn when() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 5, 10, 0, 0)
         .single()
         .expect("a valid instant")
+}
+
+/// The key of the pull request `number` that the fake lists serve for the default login.
+pub fn pr_key(number: u64) -> PrKey {
+    key_for(LOGIN, number)
 }
 
 fn key_for(login: &str, number: u64) -> PrKey {
@@ -73,6 +83,7 @@ fn summary(login: &str, number: u64, title: &str) -> PrSummary {
 pub struct FakeApi {
     pub login: String,
     pub list_calls: Arc<AtomicUsize>,
+    pub detail_calls: Arc<AtomicUsize>,
     /// Makes every list call fail.
     pub failure: Option<fn() -> GithubError>,
     /// Makes every detail and files call fail.
@@ -90,6 +101,7 @@ impl FakeApi {
         Self {
             login: login.into(),
             list_calls: Arc::new(AtomicUsize::new(0)),
+            detail_calls: Arc::new(AtomicUsize::new(0)),
             failure: None,
             detail_failure: None,
             hold: None,
@@ -129,21 +141,9 @@ impl GithubApi for FakeApi {
         _repo: &str,
         number: u64,
     ) -> Result<PrDetail, GithubError> {
+        self.detail_calls.fetch_add(1, Ordering::SeqCst);
         Self::fail(self.detail_failure)?;
-        Ok(PrDetail {
-            title: sanitize(&format!("Detail of {number}")),
-            body: sanitize("The body text"),
-            state: PrState::Open,
-            author: sanitize("octo"),
-            labels: Vec::new(),
-            requested_reviewers: Vec::new(),
-            review_decision: Some(ReviewDecision::Approved),
-            comments: Vec::new(),
-            threads: Vec::new(),
-            commits: Vec::new(),
-            check_runs: Vec::new(),
-            counts: DetailCounts::default(),
-        })
+        Ok(pr_detail(&format!("Detail of {number}")))
     }
 
     async fn files(
@@ -163,19 +163,38 @@ impl GithubApi for FakeApi {
     }
 }
 
-/// A clock the test moves by hand.
+/// A detail with `title`, the same shape the fake serves.
+pub fn pr_detail(title: &str) -> PrDetail {
+    PrDetail {
+        title: sanitize(title),
+        body: sanitize("The body text"),
+        state: PrState::Open,
+        author: sanitize("octo"),
+        labels: Vec::new(),
+        requested_reviewers: Vec::new(),
+        review_decision: Some(ReviewDecision::Approved),
+        comments: Vec::new(),
+        threads: Vec::new(),
+        commits: Vec::new(),
+        check_runs: Vec::new(),
+        counts: DetailCounts::default(),
+    }
+}
+
+/// A clock the test moves by hand, in whole milliseconds.
 #[derive(Clone)]
 pub struct TestClock(Arc<AtomicU64>);
 
 impl TestClock {
     pub fn advance(&self, by: Duration) {
-        self.0.fetch_add(by.as_secs(), Ordering::SeqCst);
+        let millis = u64::try_from(by.as_millis()).expect("a duration that fits in u64 millis");
+        self.0.fetch_add(millis, Ordering::SeqCst);
     }
 }
 
 impl Clock for TestClock {
     fn now(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(self.0.load(Ordering::SeqCst))
+        UNIX_EPOCH + Duration::from_millis(self.0.load(Ordering::SeqCst))
     }
 }
 
@@ -198,7 +217,9 @@ pub struct Harness {
     pub session: Session<TestBackend, Script, TestClock, FakeApi>,
     pub clock: TestClock,
     pub list_calls: Arc<AtomicUsize>,
+    pub detail_calls: Arc<AtomicUsize>,
     script: Script,
+    results: Sender<Message>,
     _runtime: tokio::runtime::Runtime,
 }
 
@@ -210,12 +231,28 @@ impl Harness {
         harness
     }
 
+    /// Like `start`, on a terminal wide enough for the split panes.
+    pub fn start_wide(api: FakeApi) -> Self {
+        let mut harness = Self::start_sized(vec![api], WIDE_SCREEN_WIDTH);
+        harness.settle();
+        harness.resize(WIDE_SCREEN_WIDTH);
+        harness
+    }
+
     /// A loop over `apis`, one account each, with the first load still running.
     pub fn start_unsettled(apis: Vec<FakeApi>) -> Self {
+        Self::start_sized(apis, SCREEN_WIDTH)
+    }
+
+    fn start_sized(apis: Vec<FakeApi>, width: u16) -> Self {
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let list_calls = apis.first().map_or_else(
             || Arc::new(AtomicUsize::new(0)),
             |api| Arc::clone(&api.list_calls),
+        );
+        let detail_calls = apis.first().map_or_else(
+            || Arc::new(AtomicUsize::new(0)),
+            |api| Arc::clone(&api.detail_calls),
         );
         let sources = apis
             .into_iter()
@@ -226,10 +263,13 @@ impl Harness {
             })
             .collect();
         let (loader, results) = Loader::new(runtime.handle().clone(), sources);
-        let clock = TestClock(Arc::new(AtomicU64::new(when().timestamp().unsigned_abs())));
+        let sender = loader.sender();
+        let clock = TestClock(Arc::new(AtomicU64::new(
+            when().timestamp_millis().unsigned_abs(),
+        )));
         let script = Script::default();
         let terminal =
-            Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+            Terminal::new(TestBackend::new(width, SCREEN_HEIGHT)).expect("test terminal");
         let session = Session::new(
             terminal,
             App::new(),
@@ -242,9 +282,31 @@ impl Harness {
             session,
             clock,
             list_calls,
+            detail_calls,
             script,
+            results: sender,
             _runtime: runtime,
         }
+    }
+
+    /// Sends a resize event and lets the loop handle it, so it sets the split flag.
+    pub fn resize(&mut self, width: u16) {
+        self.script.push(Event::Resize(width, SCREEN_HEIGHT));
+        self.step();
+    }
+
+    /// Puts a message on the channel the loads answer on, as a late result would arrive.
+    pub fn inject(&self, message: Message) {
+        self.results
+            .send(message)
+            .expect("the session still listens");
+    }
+
+    /// Moves the clock by `by`, steps once, and waits for any load that step started.
+    pub fn advance_and_step(&mut self, by: Duration) {
+        self.clock.advance(by);
+        self.step();
+        self.settle();
     }
 
     /// Steps until no load is running, then once more to take in the last results.

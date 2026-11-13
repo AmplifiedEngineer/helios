@@ -169,6 +169,7 @@ where
             Some(event) => self.handle_event(event),
             None => Flow::Running,
         };
+        self.app.fire_preview(self.clock.now());
         self.run_requests();
         self.drain_results();
         if self.dirty {
@@ -200,7 +201,9 @@ where
             return Flow::Running;
         }
         self.app.clear_alert();
-        match handle_key(&mut self.app, key) {
+        let outcome = handle_key(&mut self.app, key);
+        self.app.schedule_preview(self.clock.now());
+        match outcome {
             Outcome::Continue => Flow::Running,
             Outcome::Quit => Flow::Quit,
             Outcome::OpenInBrowser => {
@@ -244,6 +247,7 @@ where
                 }
                 Message::Detail(key, result) => {
                     self.note_failure(result.as_ref().as_ref().err());
+                    self.app.note_detail_answered();
                     self.app.apply_detail(&key, *result);
                 }
                 Message::OpenFailed => self.app.set_alert(OPEN_FAILED_ALERT),

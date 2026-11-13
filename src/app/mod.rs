@@ -4,6 +4,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, SystemTime};
 
 use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
@@ -93,6 +94,9 @@ pub enum ListFilter {
 const LISTS_PER_ACCOUNT: usize = 2;
 const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
 
+/// How long the cursor rests on a row before the detail pane loads that pull request.
+pub const PREVIEW_DELAY_MS: u64 = 300;
+
 /// The host and login of one account.
 pub type AccountKey = (String, String);
 
@@ -139,6 +143,13 @@ pub struct App {
     alert: Option<&'static str>,
     spinner_frame: usize,
     requests: Vec<LoadRequest>,
+    /// The pull request whose detail was asked for, while that detail has not failed.
+    detail_requested: Option<PrKey>,
+    /// Set by a cursor move; the event loop turns it into a deadline.
+    cursor_moved: bool,
+    preview_deadline: Option<SystemTime>,
+    /// The pull request of the preview load that has not answered yet.
+    preview_in_flight: Option<PrKey>,
     generation: u64,
     rows: Vec<PrSummary>,
     host_failures: BTreeMap<AccountKey, GithubError>,
@@ -244,7 +255,50 @@ impl App {
     /// Opens a pull request from the list: shows the loading state and asks for its detail.
     pub fn open(&mut self, key: PrKey) {
         self.select(key.clone());
+        self.request_detail(key);
+    }
+
+    fn request_detail(&mut self, key: PrKey) {
+        self.detail_requested = Some(key.clone());
         self.requests.push(LoadRequest::Detail(key));
+    }
+
+    /// Turns a cursor move since the last call into a preview deadline at `now` plus the delay.
+    /// A narrow screen has no detail pane to preview in.
+    pub fn schedule_preview(&mut self, now: SystemTime) {
+        if !std::mem::take(&mut self.cursor_moved) {
+            return;
+        }
+        self.preview_deadline = self
+            .split
+            .then(|| now + Duration::from_millis(PREVIEW_DELAY_MS));
+    }
+
+    /// Asks for the detail of the highlighted pull request once the deadline has passed and no
+    /// other preview load is running; the deadline stays set until then.
+    pub fn fire_preview(&mut self, now: SystemTime) {
+        let due = self
+            .preview_deadline
+            .is_some_and(|deadline| now >= deadline);
+        if !due || self.preview_in_flight.is_some() {
+            return;
+        }
+        self.preview_deadline = None;
+        let Some(key) = self.cursor().cloned() else {
+            return;
+        };
+        let failed = matches!(self.detail, DetailState::Failed(_));
+        if self.detail_requested.as_ref() == Some(&key) && !failed {
+            return;
+        }
+        self.select(key.clone());
+        self.preview_in_flight = Some(key.clone());
+        self.request_detail(key);
+    }
+
+    /// Notes that a detail load answered, so the next preview may start.
+    pub fn note_detail_answered(&mut self) {
+        self.preview_in_flight = None;
     }
 
     /// The loads asked for and not yet taken by the event loop.
@@ -300,6 +354,7 @@ impl App {
         }
         self.selected = Some(key);
         self.detail = DetailState::Loading;
+        self.detail_requested = None;
         self.reset_files();
     }
 
@@ -346,6 +401,7 @@ impl App {
     fn clear_selection(&mut self) {
         self.selected = None;
         self.detail = DetailState::Loading;
+        self.detail_requested = None;
         self.reset_files();
     }
 
