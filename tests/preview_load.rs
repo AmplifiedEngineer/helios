@@ -3,8 +3,10 @@
 #[allow(dead_code)]
 mod support;
 
-use std::sync::atomic::Ordering;
-use std::time::{Duration, UNIX_EPOCH};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use helios::app::refresh::Clock;
 use helios::app::worker::Message;
@@ -19,6 +21,11 @@ const FAR_AHEAD: Duration = Duration::from_secs(60);
 const FIRST_PR: u64 = 1;
 const SECOND_PR: u64 = 2;
 const LATE_TITLE: &str = "Late detail of the second PR";
+const NARROW_WIDTH: u16 = 90;
+const WAIT_LIMIT: Duration = Duration::from_secs(10);
+const WAIT_POLL: Duration = Duration::from_millis(1);
+/// Long enough for a load that should not start to show itself.
+const QUIET_PERIOD: Duration = Duration::from_millis(50);
 
 fn rate_limited() -> GithubError {
     GithubError::RateLimited {
@@ -34,6 +41,15 @@ fn loaded_title(harness: &Harness) -> Option<String> {
     match harness.session.app().detail() {
         DetailState::Loaded(detail) => Some(detail.title.as_str().to_owned()),
         _ => None,
+    }
+}
+
+/// Waits until the fake API has seen `expected` detail calls, as a started load reaches it late.
+fn wait_for_detail_calls(harness: &Harness, expected: usize) {
+    let deadline = Instant::now() + WAIT_LIMIT;
+    while detail_calls(harness) < expected {
+        assert!(Instant::now() < deadline, "the detail call never started");
+        thread::sleep(WAIT_POLL);
     }
 }
 
@@ -129,4 +145,55 @@ fn a_rate_limited_preview_shows_a_message_and_does_not_retry_until_the_cursor_mo
         harness.session.app().detail(),
         DetailState::Failed(GithubError::RateLimited { .. })
     ));
+}
+
+#[test]
+fn an_answer_for_another_pr_does_not_free_the_preview_slot() {
+    // Arrange
+    let release = Arc::new(AtomicBool::new(false));
+    let api = FakeApi {
+        detail_hold: Some(Arc::clone(&release)),
+        ..FakeApi::new()
+    };
+    let mut harness = Harness::start_wide(api);
+    harness.type_char('j');
+    harness.clock.advance(PAUSE);
+    harness.step();
+    wait_for_detail_calls(&harness, 1);
+
+    // Act
+    harness.inject(Message::Detail(
+        pr_key(FIRST_PR),
+        Box::new(Ok(pr_detail(LATE_TITLE))),
+    ));
+    harness.type_char_unsettled('k');
+    harness.clock.advance(PAUSE);
+    harness.step();
+    thread::sleep(QUIET_PERIOD);
+    let while_the_second_loads = detail_calls(&harness);
+    release.store(true, Ordering::SeqCst);
+    harness.settle();
+    wait_for_detail_calls(&harness, 2);
+
+    // Assert
+    assert_eq!(while_the_second_loads, 1);
+    assert_eq!(detail_calls(&harness), 2);
+}
+
+#[test]
+fn a_resize_to_narrow_cancels_a_pending_preview() {
+    // Arrange
+    let mut harness = Harness::start_wide(FakeApi::new());
+    let before = detail_calls(&harness);
+    let selected = harness.session.app().selected.clone();
+    harness.type_char('j');
+
+    // Act
+    harness.resize(NARROW_WIDTH);
+    harness.advance_and_step(PAUSE);
+    thread::sleep(QUIET_PERIOD);
+
+    // Assert
+    assert_eq!(detail_calls(&harness), before);
+    assert_eq!(harness.session.app().selected, selected);
 }

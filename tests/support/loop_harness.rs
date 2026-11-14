@@ -92,6 +92,8 @@ pub struct FakeApi {
     pub detail_failure: Option<fn() -> GithubError>,
     /// Makes every list call wait until the flag is set.
     pub hold: Option<Arc<AtomicBool>>,
+    /// Makes every detail call wait until the flag is set.
+    pub detail_hold: Option<Arc<AtomicBool>>,
 }
 
 impl FakeApi {
@@ -107,6 +109,7 @@ impl FakeApi {
             failure: None,
             detail_failure: None,
             hold: None,
+            detail_hold: None,
         }
     }
 
@@ -144,6 +147,11 @@ impl GithubApi for FakeApi {
         number: u64,
     ) -> Result<PrDetail, GithubError> {
         self.detail_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(hold) = &self.detail_hold {
+            while !hold.load(Ordering::SeqCst) {
+                tokio::time::sleep(HOLD_POLL).await;
+            }
+        }
         Self::fail(self.detail_failure)?;
         Ok(pr_detail(&format!("Detail of {number}")))
     }
@@ -340,6 +348,17 @@ impl Harness {
         let flow = self.step();
         self.settle();
         flow
+    }
+
+    /// Types a key and steps once without waiting for the loads it starts.
+    pub fn type_char_unsettled(&mut self, c: char) -> Flow {
+        self.script.push(Event::Key(KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }));
+        self.step()
     }
 
     pub fn type_char(&mut self, c: char) -> Flow {

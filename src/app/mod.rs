@@ -280,6 +280,10 @@ impl App {
         let due = self
             .preview_deadline
             .is_some_and(|deadline| now >= deadline);
+        if !self.split {
+            self.preview_deadline = None;
+            return;
+        }
         if !due || self.preview_in_flight.is_some() {
             return;
         }
@@ -296,9 +300,11 @@ impl App {
         self.request_detail(key);
     }
 
-    /// Notes that a detail load answered, so the next preview may start.
-    pub fn note_detail_answered(&mut self) {
-        self.preview_in_flight = None;
+    /// Frees the preview slot when the answer is for the preview in flight.
+    pub fn note_detail_answered(&mut self, key: &PrKey) {
+        if self.preview_in_flight.as_ref() == Some(key) {
+            self.preview_in_flight = None;
+        }
     }
 
     /// The loads asked for and not yet taken by the event loop.

@@ -247,7 +247,7 @@ where
                 }
                 Message::Detail(key, result) => {
                     self.note_failure(result.as_ref().as_ref().err());
-                    self.app.note_detail_answered();
+                    self.app.note_detail_answered(&key);
                     self.app.apply_detail(&key, *result);
                 }
                 Message::OpenFailed => self.app.set_alert(OPEN_FAILED_ALERT),
