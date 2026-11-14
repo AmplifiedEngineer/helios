@@ -5,7 +5,7 @@
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::app::App;
-use crate::theme::{ColorDepth, Ink, NamedColor, Palette, Theme};
+use crate::theme::{ColorDepth, Ink, NamedColor, Palette, Role, Theme};
 
 /// The levels of one channel in the xterm 6x6x6 color cube.
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
@@ -149,9 +149,15 @@ pub struct Styles {
     pub review_approved: Style,
     pub review_changes: Style,
     pub review_required: Style,
+    code: [Style; Role::ALL.len()],
 }
 
 impl Styles {
+    /// The style of one code token role.
+    pub fn role(&self, role: Role) -> Style {
+        self.code[role as usize]
+    }
+
     pub fn of(app: &App) -> Self {
         Self::new(app.theme(), app.depth())
     }
@@ -175,6 +181,7 @@ impl Styles {
             review_approved: ink(palette.live),
             review_changes: ink(palette.warn),
             review_required: ink(palette.caution),
+            code: Role::ALL.map(|role| ink(palette.role(role))),
         }
     }
 }

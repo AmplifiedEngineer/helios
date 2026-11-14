@@ -20,10 +20,10 @@ use crate::model::{
 };
 use crate::remote::Remote;
 use crate::theme::Theme;
-use crate::tui::cache::RenderCache;
-use crate::tui::diff::{count_changes, inline_lines};
+use crate::tui::cache::{HighlightBudget, RenderCache};
+use crate::tui::diff::{count_changes, inline_lines_highlighted, Highlighting};
 use crate::tui::list::{age_since, failure_message};
-use crate::tui::markdown::render as render_markdown;
+use crate::tui::markdown::render_styled as render_markdown;
 use crate::tui::style::Styles;
 
 const COMMENTS_HEADING: &str = "Issue comments";
@@ -58,6 +58,7 @@ struct Bodies<'a> {
     pr_key: String,
     width: u16,
     theme: Theme,
+    styles: Styles,
 }
 
 impl Bodies<'_> {
@@ -73,7 +74,7 @@ impl Bodies<'_> {
             hasher.finish(),
             width,
             self.theme,
-            || render_markdown(&from_remote(body), width),
+            || render_markdown(&from_remote(body), width, &self.styles),
         );
         if indent.is_empty() {
             return lines;
@@ -96,13 +97,35 @@ pub fn render_cached(
     clock: &impl Clock,
     cache: &RenderCache,
 ) {
+    render_budgeted(
+        frame,
+        area,
+        app,
+        clock,
+        cache,
+        &HighlightBudget::per_frame(),
+    );
+}
+
+/// Like `render_cached`, highlighting open diffs within `budget`, which the frame shares.
+pub fn render_budgeted(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    clock: &impl Clock,
+    cache: &RenderCache,
+    budget: &HighlightBudget,
+) {
+    let styles = Styles::of(app);
+    let pr_key = app.selected.as_ref().map(pr_key_text).unwrap_or_default();
+    let highlight = Highlighting::for_theme(app.theme(), &pr_key, cache, budget);
     let bodies = Bodies {
         cache,
-        pr_key: app.selected.as_ref().map(pr_key_text).unwrap_or_default(),
+        pr_key: pr_key.clone(),
         width: area.width,
         theme: app.theme(),
+        styles,
     };
-    let styles = Styles::of(app);
     let mut cursor_line = 0;
     let lines = match app.detail() {
         DetailState::Loading => vec![Line::from(LOADING_TEXT)],
@@ -116,7 +139,7 @@ pub fn render_cached(
                 commit_lines(&detail.commits, clock),
             ),
             DetailTab::Files => {
-                let drawn = file_lines(app, area.width, &styles);
+                let drawn = file_lines(app, area.width, &styles, highlight);
                 cursor_line = drawn.cursor_line;
                 drawn.lines
             }
@@ -145,7 +168,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
     render_cached(frame, area, app, clock, &RenderCache::new());
 }
 
-fn pr_key_text(key: &PrKey) -> String {
+pub(crate) fn pr_key_text(key: &PrKey) -> String {
     format!("{}/{}/{}#{}", key.host, key.account, key.repo, key.number)
 }
 
@@ -232,7 +255,12 @@ impl FileLines {
     }
 }
 
-fn file_lines(app: &App, width: u16, styles: &Styles) -> FileLines {
+fn file_lines(
+    app: &App,
+    width: u16,
+    styles: &Styles,
+    highlight: Option<Highlighting>,
+) -> FileLines {
     if let Some(error) = app.files_failure() {
         return FileLines::only(Line::styled(failure_message(error), styles.error));
     }
@@ -281,7 +309,13 @@ fn file_lines(app: &App, width: u16, styles: &Styles) -> FileLines {
         });
         if let Some(file) = open_file {
             let diff_indent = format!("{indent}{DIFF_INDENT}");
-            lines.extend(inline_lines(file, usize::from(width), &diff_indent));
+            lines.extend(inline_lines_highlighted(
+                file,
+                usize::from(width),
+                &diff_indent,
+                styles,
+                highlight,
+            ));
         }
     }
     FileLines { lines, cursor_line }
