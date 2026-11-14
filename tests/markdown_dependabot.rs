@@ -19,7 +19,9 @@ fn all_text(blocks: &[Block], out: &mut Vec<String>) {
     for block in blocks {
         match block {
             Block::Paragraph(content) | Block::Heading { content, .. } => inline_text(content, out),
-            Block::List(items) => items.iter().for_each(|item| all_text(item, out)),
+            Block::List(items) | Block::OrderedList(items) => {
+                items.iter().for_each(|item| all_text(item, out))
+            }
             Block::Quote(inner) => all_text(inner, out),
             Block::Code { text, .. } => out.push(text.clone()),
             Block::Table(table) => {
@@ -59,7 +61,9 @@ fn all_inlines(blocks: &[Block], out: &mut Vec<Inline>) {
     for block in blocks {
         match block {
             Block::Paragraph(content) | Block::Heading { content, .. } => walk(content, out),
-            Block::List(items) => items.iter().for_each(|item| all_inlines(item, out)),
+            Block::List(items) | Block::OrderedList(items) => {
+                items.iter().for_each(|item| all_inlines(item, out))
+            }
             Block::Quote(inner) => all_inlines(inner, out),
             _ => {}
         }
@@ -70,7 +74,9 @@ fn all_blocks<'a>(blocks: &'a [Block], out: &mut Vec<&'a Block>) {
     for block in blocks {
         out.push(block);
         match block {
-            Block::List(items) => items.iter().for_each(|item| all_blocks(item, out)),
+            Block::List(items) | Block::OrderedList(items) => {
+                items.iter().for_each(|item| all_blocks(item, out))
+            }
             Block::Quote(inner) => all_blocks(inner, out),
             _ => {}
         }

@@ -23,6 +23,8 @@ pub enum Block {
     },
     /// Each item is a list of blocks.
     List(Vec<Vec<Block>>),
+    /// Like `List`, numbered from 1; the source start number is not kept.
+    OrderedList(Vec<Vec<Block>>),
     Quote(Vec<Block>),
     Code {
         lang: Option<String>,
@@ -70,7 +72,7 @@ impl Document {
 
 fn children(block: &Block) -> Vec<&[Block]> {
     match block {
-        Block::List(items) => items.iter().map(Vec::as_slice).collect(),
+        Block::List(items) | Block::OrderedList(items) => items.iter().map(Vec::as_slice).collect(),
         Block::Quote(inner) => vec![inner.as_slice()],
         _ => Vec::new(),
     }
@@ -87,7 +89,7 @@ fn depth(blocks: &[Block]) -> usize {
     blocks
         .iter()
         .map(|block| match block {
-            Block::List(_) | Block::Quote(_) => {
+            Block::List(_) | Block::OrderedList(_) | Block::Quote(_) => {
                 1 + children(block).into_iter().map(depth).max().unwrap_or(0)
             }
             _ => 0,

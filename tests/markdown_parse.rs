@@ -143,7 +143,9 @@ fn block_strings<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
             Block::Paragraph(content) | Block::Heading { content, .. } => {
                 inline_strings(content, out);
             }
-            Block::List(items) => items.iter().for_each(|item| block_strings(item, out)),
+            Block::List(items) | Block::OrderedList(items) => {
+                items.iter().for_each(|item| block_strings(item, out))
+            }
             Block::Quote(inner) => block_strings(inner, out),
             Block::Code { lang, text } => {
                 out.extend(lang.as_deref());
@@ -386,4 +388,23 @@ fn an_unfinished_tag_does_not_make_later_html_slow() {
     );
     let strong_count = format!("{document:?}").matches("Strong(").count();
     assert_eq!(strong_count, LATER_TAG_PAIRS);
+}
+
+#[test]
+fn an_ordered_list_parses_to_an_ordered_list_block() {
+    // Arrange
+    let ordered = "1. one\n2. two\n";
+    let bullets = "- one\n- two\n";
+    let items = vec![
+        vec![Block::Paragraph(vec![text("one")])],
+        vec![Block::Paragraph(vec![text("two")])],
+    ];
+
+    // Act
+    let from_ordered = parse(ordered);
+    let from_bullets = parse(bullets);
+
+    // Assert
+    assert_eq!(from_ordered.blocks, vec![Block::OrderedList(items.clone())]);
+    assert_eq!(from_bullets.blocks, vec![Block::List(items)]);
 }

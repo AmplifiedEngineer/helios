@@ -12,6 +12,7 @@ use ratatui::Frame;
 
 use crate::app::refresh::Clock;
 use crate::app::{App, DetailTab, ListView, Screen};
+use crate::tui::cache::RenderCache;
 use crate::tui::keys::{self, Scope};
 use crate::tui::{detail, diff, list};
 
@@ -49,8 +50,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_with(frame, app, &SystemClock);
 }
 
-/// Draws the app with ages measured against `clock`.
-pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
+/// Draws the app, reusing rendered lines from `cache`.
+pub fn draw_cached(frame: &mut Frame, app: &App, clock: &impl Clock, cache: &RenderCache) {
     let scope = Scope::of(app);
     let footer_height = keys::footer_height(scope, frame.area().width);
     let [header, body, footer] = Layout::vertical([
@@ -66,13 +67,18 @@ pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
     frame.render_widget(Paragraph::new(header_text), header);
     match app.screen {
         Screen::List => draw_list(frame, body, app, clock),
-        Screen::Detail => detail::render(frame, body, app, clock),
+        Screen::Detail => detail::render_cached(frame, body, app, clock, cache),
         Screen::Diff => draw_diff(frame, body, app),
     }
     keys::render_footer_for(frame, footer, Some(scope));
     if app.show_help {
         draw_help(frame, body, scope);
     }
+}
+
+/// Draws the app with ages measured against `clock`.
+pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
+    draw_cached(frame, app, clock, &RenderCache::new());
 }
 
 /// The names in `names` on one line, the current one in brackets and bold.

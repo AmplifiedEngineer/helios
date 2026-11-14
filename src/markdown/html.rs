@@ -213,7 +213,13 @@ impl Builder {
     fn html_text(&mut self, text: &str) {
         let loose = matches!(
             self.stack.last(),
-            Some(Frame::Root(_) | Frame::Item(_) | Frame::Quote(_) | Frame::List(_))
+            Some(
+                Frame::Root(_)
+                    | Frame::Item(_)
+                    | Frame::Quote(_)
+                    | Frame::List(_)
+                    | Frame::OrderedList(_)
+            )
         );
         if !(loose && text.trim().is_empty()) {
             self.text(text);
@@ -227,7 +233,8 @@ impl Builder {
         }
         match name {
             "p" => self.open_block(Frame::Para(Vec::new())),
-            "ul" | "ol" => self.open_container(Frame::List(Vec::new())),
+            "ul" => self.open_container(Frame::List(Vec::new())),
+            "ol" => self.open_container(Frame::OrderedList(Vec::new())),
             "blockquote" => self.open_container(Frame::Quote(Vec::new())),
             "pre" => self.open_block(Frame::Pre(String::new())),
             "summary" => self.open_block(Frame::Summary(Vec::new())),
@@ -259,7 +266,7 @@ impl Builder {
             "ul" | "ol" => {
                 self.flush_implicit_paragraph();
                 self.close_open_item();
-                self.close_if(|frame| matches!(frame, Frame::List(_)));
+                self.close_if(|frame| matches!(frame, Frame::List(_) | Frame::OrderedList(_)));
             }
             "li" if self.flattened == 0 => {
                 self.flush_implicit_paragraph();

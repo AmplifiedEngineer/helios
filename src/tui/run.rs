@@ -18,7 +18,8 @@ use crate::app::{App, ListView, Screen};
 use crate::browser;
 use crate::github::errors::GithubError;
 use crate::github::GithubApi;
-use crate::tui::draw::draw_with;
+use crate::tui::cache::RenderCache;
+use crate::tui::draw::draw_cached;
 use crate::tui::keys::{handle_key, Outcome};
 
 /// How long one step waits for a key before it looks at the background results again.
@@ -78,6 +79,7 @@ pub struct Session<B: Backend, E, C: Clock, A> {
     app: App,
     events: E,
     clock: C,
+    cache: RenderCache,
     scheduler: Scheduler<C>,
     loader: Loader<A>,
     results: Receiver<Message>,
@@ -110,6 +112,7 @@ where
             app,
             events,
             clock,
+            cache: RenderCache::new(),
             scheduler,
             loader,
             results,
@@ -252,9 +255,9 @@ where
     }
 
     fn draw(&mut self) -> io::Result<()> {
-        let (app, clock) = (&self.app, &self.clock);
+        let (app, clock, cache) = (&self.app, &self.clock, &self.cache);
         self.terminal
-            .draw(|frame| draw_with(frame, app, clock))
+            .draw(|frame| draw_cached(frame, app, clock, cache))
             .map_err(|error| io::Error::other(error.to_string()))?;
         self.dirty = false;
         Ok(())

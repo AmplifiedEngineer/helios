@@ -1,0 +1,60 @@
+Require confirmation before `gh repo delete` deletes private forks
+BagToad Merged
+Approved
+
+Bumps serde (https://github.com/serde-rs/serde) from 1.0.1 to 1.0.2.
+
+Release notes
+
+Sourced from serde's releases (https://github.com/serde-rs/serde/releases).
+
+| v1.0.2
+|
+| - Fix a bug by @someone (https://github.com/someone) in serde-rs/serde#1 (https://github.com/serde-rs/serde/pull/1)
+
+Commits
+
+- abc1234 (https://github.com/serde-rs/serde/commit/abc) Release 1.0.2
+
+Dependabot will resolve any conflicts with this PR as long as you do not alter it yourself.
+
+Dependabot commands and options
+
+You can trigger Dependabot actions by commenting on this PR:
+
+- @dependabot rebase will rebase this PR
+- @dependabot recreate will recreate this PR, overwriting any edits that have been made to it
+- @dependabot merge will merge this PR after your CI passes on it
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

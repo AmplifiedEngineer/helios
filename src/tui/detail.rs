@@ -2,6 +2,9 @@
 
 //! The detail view: one tab each for overview, conversation, commits, files and checks.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -11,11 +14,15 @@ use ratatui::Frame;
 use crate::app::refresh::Clock;
 use crate::app::{App, DetailState, DetailTab};
 use crate::github::octo::MAX_FILES;
+use crate::markdown::from_remote;
 use crate::model::{
     ChangedFile, CheckRun, CheckRunState, Comment, CommitSummary, DiffGap, FileDiff, PrDetail,
-    PrState, ReviewDecision, Shown,
+    PrKey, PrState, ReviewDecision, Shown,
 };
+use crate::remote::Remote;
+use crate::tui::cache::RenderCache;
 use crate::tui::list::{age_since, failure_message};
+use crate::tui::markdown::render as render_markdown;
 
 const COMMENTS_HEADING: &str = "Issue comments";
 const THREADS_HEADING: &str = "Review threads";
@@ -35,15 +42,59 @@ const MARK_CHANGED_NO_TEXT: &str = "binary or mode change";
 const MARK_RENAMED: &str = "renamed";
 const MARK_ADDED_OR_REMOVED_NO_TEXT: &str = "empty or binary";
 const SHORT_OID_LEN: usize = 7;
+const OVERVIEW_ITEM: &str = "overview";
 
-/// Draws the selected tab of the open pull request, with ages measured against `clock`.
-pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
+/// Renders markdown bodies through the cache for one pull request at one width.
+struct Bodies<'a> {
+    cache: &'a RenderCache,
+    pr_key: String,
+    width: u16,
+}
+
+impl Bodies<'_> {
+    /// The body as styled lines, each starting with `indent`.
+    fn lines(&self, item: &str, body: &Remote, indent: &str) -> Vec<Line<'static>> {
+        let mut hasher = DefaultHasher::new();
+        body.as_str().hash(&mut hasher);
+        let indent_width = u16::try_from(indent.chars().count()).unwrap_or(u16::MAX);
+        let width = self.width.saturating_sub(indent_width);
+        let lines = self
+            .cache
+            .lines(&self.pr_key, item, hasher.finish(), width, || {
+                render_markdown(&from_remote(body), width)
+            });
+        if indent.is_empty() {
+            return lines;
+        }
+        lines
+            .into_iter()
+            .map(|mut line| {
+                line.spans.insert(0, indent.to_owned().into());
+                line
+            })
+            .collect()
+    }
+}
+
+/// Draws the selected tab, reusing rendered lines from `cache`.
+pub fn render_cached(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    clock: &impl Clock,
+    cache: &RenderCache,
+) {
+    let bodies = Bodies {
+        cache,
+        pr_key: app.current_pr().map(pr_key_text).unwrap_or_default(),
+        width: area.width,
+    };
     let lines = match app.detail() {
         DetailState::Loading => vec![Line::from(LOADING_TEXT)],
         DetailState::Failed(error) => vec![Line::from(failure_message(error))],
         DetailState::Loaded(detail) => match app.tab {
-            DetailTab::Overview => overview_lines(detail),
-            DetailTab::Conversation => conversation_lines(detail, clock),
+            DetailTab::Overview => overview_lines(detail, &bodies),
+            DetailTab::Conversation => conversation_lines(detail, clock, &bodies),
             DetailTab::Commits => with_count_note(
                 detail.counts.commits,
                 COMMITS_NOUN,
@@ -68,6 +119,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
         u16::try_from(app.detail_scroll()).unwrap_or(u16::MAX)
     };
     frame.render_widget(paragraph.scroll((scroll, 0)), area);
+}
+
+/// Draws the selected tab of the open pull request, with ages measured against `clock`.
+pub fn render(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {
+    render_cached(frame, area, app, clock, &RenderCache::new());
+}
+
+fn pr_key_text(key: &PrKey) -> String {
+    format!("{}/{}/{}#{}", key.host, key.account, key.repo, key.number)
 }
 
 /// How far the Files tab scrolls so the last row of the selected file stays in view, counting
@@ -101,7 +161,7 @@ fn with_count_note(count: Shown, noun: &str, mut lines: Vec<Line<'static>>) -> V
     lines
 }
 
-fn overview_lines(detail: &PrDetail) -> Vec<Line<'static>> {
+fn overview_lines(detail: &PrDetail, bodies: &Bodies) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from(detail.title.to_string()),
         Line::from(format!("{} {}", detail.author, state_text(&detail.state))),
@@ -110,13 +170,7 @@ fn overview_lines(detail: &PrDetail) -> Vec<Line<'static>> {
         lines.push(Line::from(review_text(decision)));
     }
     lines.push(Line::from(String::new()));
-    lines.extend(
-        detail
-            .body
-            .as_str()
-            .lines()
-            .map(|text| Line::from(text.to_owned())),
-    );
+    lines.extend(bodies.lines(OVERVIEW_ITEM, &detail.body, ""));
     lines
 }
 
@@ -218,18 +272,31 @@ fn check_state_text(state: &CheckRunState) -> String {
 }
 
 /// Issue comments first, then the review threads, each under its own heading.
-fn conversation_lines(detail: &PrDetail, clock: &impl Clock) -> Vec<Line<'static>> {
+fn conversation_lines(
+    detail: &PrDetail,
+    clock: &impl Clock,
+    bodies: &Bodies,
+) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(COMMENTS_HEADING)];
     lines.extend(count_note(detail.counts.comments, COMMENTS_NOUN));
-    for comment in &detail.comments {
-        push_comment(&mut lines, comment, "", clock);
+    for (index, comment) in detail.comments.iter().enumerate() {
+        let item = format!("comment-{index}");
+        push_comment(
+            &mut lines,
+            comment,
+            "",
+            clock,
+            bodies.lines(&item, &comment.body, ""),
+        );
     }
     lines.push(Line::from(THREADS_HEADING));
     lines.extend(count_note(detail.counts.threads, THREADS_NOUN));
-    for thread in &detail.threads {
+    for (thread_index, thread) in detail.threads.iter().enumerate() {
         lines.push(Line::from(thread.path.to_string()));
-        for reply in &thread.comments {
-            push_comment(&mut lines, reply, REPLY_INDENT, clock);
+        for (index, reply) in thread.comments.iter().enumerate() {
+            let item = format!("thread-{thread_index}-{index}");
+            let body = bodies.lines(&item, &reply.body, REPLY_INDENT);
+            push_comment(&mut lines, reply, REPLY_INDENT, clock, body);
         }
         lines.extend(count_note(thread.comment_count, THREAD_COMMENTS_NOUN));
     }
@@ -241,14 +308,9 @@ fn push_comment(
     comment: &Comment,
     indent: &str,
     clock: &impl Clock,
+    body: Vec<Line<'static>>,
 ) {
     let age = age_since(comment.created_at, clock.now());
     lines.push(Line::from(format!("{indent}{} {age}", comment.author)));
-    lines.extend(
-        comment
-            .body
-            .as_str()
-            .lines()
-            .map(|text| Line::from(format!("{indent}{text}"))),
-    );
+    lines.extend(body);
 }

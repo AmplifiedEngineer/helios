@@ -27,3 +27,23 @@ fn a_document_counts_its_blocks_for_the_limit() {
     assert_eq!(nesting_depth, 2);
     assert!(!document.cut);
 }
+
+#[test]
+fn an_ordered_list_counts_and_nests_like_a_list() {
+    // Arrange: an ordered list whose item holds a paragraph and a nested
+    // ordered list that holds one more paragraph.
+    let nested = Block::OrderedList(vec![vec![paragraph("deep")]]);
+    let outer = Block::OrderedList(vec![vec![paragraph("item"), nested]]);
+    let document = Document {
+        blocks: vec![outer],
+        cut: false,
+    };
+
+    // Act
+    let block_count = document.block_count();
+    let nesting_depth = document.nesting_depth();
+
+    // Assert: the outer list, "item", the nested list and "deep".
+    assert_eq!(block_count, 4);
+    assert_eq!(nesting_depth, 2);
+}

@@ -7,7 +7,9 @@ use helios::github::errors::GithubError;
 use helios::github::octo::MAX_FILES;
 use helios::github::queries::{map_detail, map_files};
 use helios::model::PrKey;
+use helios::tui::cache::RenderCache;
 use helios::tui::detail;
+use helios::tui::draw::draw_cached;
 use helios::tui::keys::{handle_key, BINDINGS};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -163,7 +165,6 @@ fn overview_tab_shows_title_author_state_review_and_body() {
             "BagToad",
             "Merged",
             "Approved",
-            "Thank you for contributing to GitHub CLI!",
         ],
     );
     assert_snapshot("detail_overview", &screen);
@@ -589,4 +590,104 @@ fn files_tab_has_no_note_when_the_list_is_whole() {
 
     // Assert
     assert!(!screen.contains("Showing the first"), "{screen}");
+}
+
+const DEPENDABOT_FIXTURE: &str = "tests/fixtures/markdown/dependabot.md";
+const QUOTED_AND_FENCED_COMMENT: &str = "Looks good.\n\n> quoted\n\n```rust\nlet x = 1;\n```\n";
+
+fn open_detail_with(tab: DetailTab, edit: impl FnOnce(&mut serde_json::Value)) -> App {
+    let json = fs::read_to_string(RECORDED_FIXTURE).expect("read the detail fixture");
+    let mut value: serde_json::Value = serde_json::from_str(&json).expect("parse the fixture");
+    edit(&mut value["data"]["repository"]["pullRequest"]);
+    let detail = map_detail(&value.to_string()).expect("map the edited fixture");
+    let mut app = App::new();
+    app.select(key());
+    app.apply_detail(&key(), Ok(detail));
+    app.tab = tab;
+    app
+}
+
+fn render_cached_detail(app: &App, cache: &RenderCache) -> String {
+    let mut terminal =
+        Terminal::new(TestBackend::new(SCREEN_WIDTH, SCREEN_HEIGHT)).expect("test terminal");
+    terminal
+        .draw(|frame| {
+            detail::render_cached(
+                frame,
+                frame.area(),
+                app,
+                &FixedClock::at(2026, 11, 7, 20, 30, 46),
+                cache,
+            )
+        })
+        .expect("draw");
+    buffer_text(terminal.backend().buffer())
+}
+
+fn draw_app(app: &App, cache: &RenderCache, width: u16) {
+    let mut terminal = Terminal::new(TestBackend::new(width, SCREEN_HEIGHT)).expect("terminal");
+    terminal
+        .draw(|frame| draw_cached(frame, app, &FixedClock::at(2026, 11, 7, 20, 30, 46), cache))
+        .expect("draw");
+}
+
+#[test]
+fn the_overview_renders_a_dependabot_body_as_text() {
+    // Arrange
+    let body = fs::read_to_string(DEPENDABOT_FIXTURE).expect("read the dependabot body");
+    let app = open_detail_with(DetailTab::Overview, |pull| pull["body"] = body.into());
+    let cache = RenderCache::new();
+
+    // Act
+    let screen = render_cached_detail(&app, &cache);
+
+    // Assert
+    for raw in ["<details", "**", "]("] {
+        assert!(!screen.contains(raw), "the screen shows {raw:?}:\n{screen}");
+    }
+    assert_snapshot("detail_dependabot", &screen);
+}
+
+#[test]
+fn two_draws_parse_the_body_once() {
+    // Arrange
+    let mut app = open_detail(DetailTab::Overview);
+    app.screen = Screen::Detail;
+    let cache = RenderCache::new();
+
+    // Act
+    draw_app(&app, &cache, SCREEN_WIDTH);
+    draw_app(&app, &cache, SCREEN_WIDTH);
+
+    // Assert
+    assert_eq!(cache.builds(), 1, "the second draw reuses the body lines");
+
+    // Act
+    draw_app(&app, &cache, SCREEN_WIDTH - 20);
+
+    // Assert
+    assert_eq!(cache.builds(), 2, "a new width renders the body again");
+}
+
+#[test]
+fn a_comment_body_renders_markdown() {
+    // Arrange
+    let app = open_detail_with(DetailTab::Conversation, |pull| {
+        pull["comments"]["nodes"][0]["body"] = QUOTED_AND_FENCED_COMMENT.into();
+    });
+    let cache = RenderCache::new();
+
+    // Act
+    let screen = render_cached_detail(&app, &cache);
+
+    // Assert
+    assert!(!screen.contains("```"), "a fence marker shows:\n{screen}");
+    assert!(
+        !screen
+            .lines()
+            .any(|line| line.trim_start().starts_with('>')),
+        "quote syntax shows:\n{screen}"
+    );
+    assert!(line_with(&screen, "quoted").contains("| "), "{screen}");
+    assert_snapshot("detail_conversation_markdown", &screen);
 }

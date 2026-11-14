@@ -2,59 +2,59 @@ Require confirmation before `gh repo delete` deletes private forks
 BagToad Merged
 Approved
 
-<!--
-Thank you for contributing to GitHub CLI!
+Description
 
-If you are proposing a fix for a security issue, STOP and follow .github/SECURITY.md instead.
-
-Keep the entire pull request self-contained, reviewer-facing, and diegetic: describe the
-change, rationale, and evidence within the context of the repository and pull request. Do not
-narrate how the pull request was produced or refer to private conversations, prior agent work,
-or other behind-the-scenes context. Omit those details unless they materially affect review;
-if they do, state the relevant fact and its significance directly.
--->
-
-<!-- List related issues here. Use `fixes` or `closes` keywords to associate an issue number. -->
-
-### Description
-
-<!--
-What's the problem? How are we addressing it?
-
-Write for a reviewer who has not worked in this part of the codebase. Give them the
-background they need before the problem makes sense, and avoid jargon.
--->
-
-Deleting a private repository also deletes all of its forks
-([docs](https://docs.github.com/en/repositories/creating-and-managing-repositories/deleting-a-repository)). The web UI
-warns about this before you confirm: "This will also delete all 3 forks since this is a private repository." Our [`repo
-delete`
-command](https://github.com/cli/cli/blob/f7a06a18a91eef5c0b218b549dab64b86f36f8b9/pkg/cmd/repo/delete/delete.go#L118-L12
-4) doesn't. It only asks you to type the repo name, and `--yes` skips even that.
+Deleting a private repository also deletes all of its forks (docs
+(https://docs.github.com/en/repositories/creating-and-managing-repositories/de...)). The web UI warns about this before
+you confirm: "This will also delete all 3 forks since this is a private repository." Our repo delete command
+(https://github.com/cli/cli/blob/f7a06a18a91eef5c0b218b549dab64b86f36f8b9/pkg/...) doesn't. It only asks you to type the
+repo name, and --yes skips even that.
 
 The person deleting often can't see those forks. Private forks only inherit team access from their upstream, not
-individual access ([docs](https://docs.github.com/en/pull-requests/reference/forks#permissions-of-forks)).
+individual access (docs (https://docs.github.com/en/pull-requests/reference/forks#permissions-of-forks)).
 
-`gh repo delete` now [looks up the
-repo](https://github.com/cli/cli/blob/4948470b5a97a7fd839df5389527f575070ab2f8/pkg/cmd/repo/delete/http.go#L12-L44)
-before deleting it. The [new
-check](https://github.com/cli/cli/blob/4948470b5a97a7fd839df5389527f575070ab2f8/pkg/cmd/repo/delete/delete.go#L162-L199)
+gh repo delete now looks up the repo (https://github.com/cli/cli/blob/4948470b5a97a7fd839df5389527f575070ab2f8/pkg/...)
+before deleting it. The new check (https://github.com/cli/cli/blob/4948470b5a97a7fd839df5389527f575070ab2f8/pkg/...)
 only steps in when the repo takes its forks with it:
 
-```go
-// A public repo keeps its forks, and deleting a fork leaves that fork's own forks alone
-if !info.Private || info.Fork || info.ForksCount == 0 {
-return nil
-}
-```
+    // A public repo keeps its forks, and deleting a fork leaves that fork's own forks alone
+    if !info.Private || info.Fork || info.ForksCount == 0 {
+    return nil
+    }
 
 When it does step in:
 
-- In a terminal, `gh` shows the same warning as the web UI, then asks `Delete OWNER/REPO and its forks?`, defaulting to
-No. It asks even with `--yes`.
-- Without a terminal, `gh` exits 1 unless you also pass the new `--accept-cascading-deletion-of-private-forks` flag.
+- In a terminal, gh shows the same warning as the web UI, then asks Delete OWNER/REPO and its forks?, defaulting to No.
+  It asks even with --yes.
+- Without a terminal, gh exits 1 unless you also pass the new --accept-cascading-deletion-of-private-forks flag.
 
-### How did you test this change?
+How did you test this change?
 
-<!--
-Report only actions you actually performed and results you actually observed, using factual
+I built gh from trunk at f7a06a1 and from this branch at 4948470. I pointed both at a small local stand-in for the REST
+API through an HTTP proxy, so no real repositories were touched. Every run used an empty config directory and a
+placeholder token.
+
+I recorded four terminal runs of this branch's build. Each one ends by printing the requests the stand-in API received.
+
+https://github.com/user-attachments/assets/a2871b54-a0a5-4851-8889-fbb3e25f1eda
+
+Open chapters and agent notes (https://bagtoad.github.io/github-video-navigator/?url=https%3A%2F%2Fgithub.co...)
+
+- With 3 forks, I saw the warning, answered y, and typed the repo name. The API saw the GET, then the DELETE.
+- Pressing Enter at the fork prompt took the default No. gh exited with status 2 and sent no DELETE.
+- With --yes, the fork prompt still appeared, but the name prompt didn't.
+- With the new flag, only the name prompt appeared, and the API saw only the DELETE.
+
+Without a terminal, trunk deleted a private repo with 3 forks and printed nothing. This branch exited with status 1
+after only the GET:
+
+    --accept-cascading-deletion-of-private-forks required when not running interactively: deleting
+octo-org/secrets-vault will also delete all 3 forks since this is a private repository
+
+I also ran these without a terminal:
+
+- Adding the new flag skipped the lookup and sent only the DELETE.
+- An internal repo with forks got the same error as a private one.
+- A public repo with forks, a private fork with forks, and a private repo with no forks were still deleted.
+- A missing repo and a renamed repo printed byte-identical output on both builds, with the same exit code. That includes
+  the delete_repo scope hint for the missing repo. The branch now stops at the GET, so no DELETE is sent.

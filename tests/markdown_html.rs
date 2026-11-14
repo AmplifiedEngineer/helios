@@ -135,7 +135,9 @@ fn block_strings<'a>(blocks: &'a [Block], out: &mut Vec<&'a str>) {
             Block::Paragraph(content) | Block::Heading { content, .. } => {
                 inline_strings(content, out);
             }
-            Block::List(items) => items.iter().for_each(|item| block_strings(item, out)),
+            Block::List(items) | Block::OrderedList(items) => {
+                items.iter().for_each(|item| block_strings(item, out))
+            }
             Block::Quote(inner) => block_strings(inner, out),
             Block::Code { lang, text } => {
                 out.extend(lang.as_deref());
@@ -231,7 +233,9 @@ fn visible_text(blocks: &[Block]) -> String {
         for block in blocks {
             match block {
                 Block::Paragraph(c) | Block::Heading { content: c, .. } => inlines(c, out),
-                Block::List(items) => items.iter().for_each(|item| walk(item, out)),
+                Block::List(items) | Block::OrderedList(items) => {
+                    items.iter().for_each(|item| walk(item, out))
+                }
                 Block::Quote(inner) => walk(inner, out),
                 _ => {}
             }
@@ -258,7 +262,9 @@ fn text_nodes(blocks: &[Block]) -> Vec<String> {
         for block in blocks {
             match block {
                 Block::Paragraph(c) | Block::Heading { content: c, .. } => inlines(c, out),
-                Block::List(items) => items.iter().for_each(|item| walk(item, out)),
+                Block::List(items) | Block::OrderedList(items) => {
+                    items.iter().for_each(|item| walk(item, out))
+                }
                 Block::Quote(inner) => walk(inner, out),
                 _ => {}
             }
@@ -515,4 +521,21 @@ fn a_long_comment_in_one_fragment_is_dropped() {
 
     // Assert
     assert_eq!(blocks, vec![Block::Paragraph(vec![text("after")])]);
+}
+
+#[test]
+fn ol_becomes_an_ordered_list_and_ul_stays_a_list() {
+    // Arrange
+    let items = vec![
+        vec![Block::Paragraph(vec![text("one")])],
+        vec![Block::Paragraph(vec![text("two")])],
+    ];
+
+    // Act
+    let from_ol = tokenize("<ol><li>one</li><li>two</li></ol>");
+    let from_ul = tokenize("<ul><li>one</li><li>two</li></ul>");
+
+    // Assert
+    assert_eq!(from_ol, vec![Block::OrderedList(items.clone())]);
+    assert_eq!(from_ul, vec![Block::List(items)]);
 }
