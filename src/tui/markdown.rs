@@ -19,9 +19,9 @@ const CHECKED_BOX: &str = "[x] ";
 const NESTED_LIST_INDENT: usize = 2;
 
 /// Appended after the last block when the document was cut short.
-pub(crate) const CUT_NOTE: &str = "[showing part of this text]";
+pub const CUT_NOTE: &str = "[showing part of this text]";
 /// Longest URL, in characters, shown whole next to a link.
-pub(crate) const MAX_URL_DISPLAY: usize = 80;
+pub const MAX_URL_DISPLAY: usize = 80;
 const QUOTE_BAR: &str = "| ";
 const ELLIPSIS: &str = "...";
 
@@ -259,16 +259,16 @@ fn cells_width(cells: &[Cell]) -> usize {
     cells.iter().map(|&(c, _)| char_width(c)).sum()
 }
 
-/// Length of the longest prefix of `cells` that fits `width` columns, at least one cell.
-fn fitting_prefix(cells: &[Cell], width: usize) -> usize {
+/// Length of the longest prefix that fits `width` columns (at least one cell), or `None` if all fit.
+fn overflow_cut(cells: &[Cell], width: usize) -> Option<usize> {
     let mut used = 0;
     for (index, &(c, _)) in cells.iter().enumerate() {
         used += char_width(c);
         if used > width {
-            return index.max(1);
+            return Some(index.max(1));
         }
     }
-    cells.len()
+    None
 }
 
 /// Greedy word wrap; a word wider than `width` is split across lines.
@@ -300,8 +300,8 @@ fn wrap(cells: &[Cell], width: usize) -> Vec<Vec<Cell>> {
         } else if let (Some(space), true) = (space, gap == 1) {
             current.push(space);
         }
-        while cells_width(word) > width {
-            let (head, tail) = word.split_at(fitting_prefix(word, width));
+        while let Some(cut) = overflow_cut(word, width) {
+            let (head, tail) = word.split_at(cut);
             if !current.is_empty() {
                 lines.push(std::mem::take(&mut current));
             }

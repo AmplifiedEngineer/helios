@@ -2,10 +2,11 @@
 
 use helios::markdown::{Block, Document, Inline, Table};
 use helios::tui::cache::RenderCache;
-use helios::tui::markdown::render;
+use helios::tui::markdown::{render, CUT_NOTE, MAX_URL_DISPLAY};
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use std::cell::Cell;
+use std::time::{Duration, Instant};
 
 fn text(value: &str) -> Vec<Inline> {
     vec![Inline::Text(value.to_string())]
@@ -138,8 +139,6 @@ fn an_ordered_list_uses_numbers() {
 
 /// The quote bar is ASCII so mono and ASCII-only terminals draw it the same.
 const QUOTE_BAR: &str = "| ";
-const CUT_NOTE: &str = "[showing part of this text]";
-const MAX_URL_DISPLAY: usize = 80;
 const HOST_PREFIX: &str = "https://host.example/";
 
 fn link_to(url: &str) -> Document {
@@ -190,6 +189,33 @@ fn a_quote_has_a_bar_on_every_line() {
         nested_lines,
         vec![format!("{QUOTE_BAR}{QUOTE_BAR}aaaa bbbb")]
     );
+}
+
+#[test]
+fn a_nested_quote_wraps_inside_its_bars() {
+    // Arrange
+    let width: u16 = 12;
+    let words = "aaaa bbbb cccc";
+    let doc = document(vec![Block::Quote(vec![Block::Quote(vec![
+        Block::Paragraph(text(words)),
+    ])])]);
+    let nested_prefix = QUOTE_BAR.repeat(2);
+
+    // Act
+    let lines = render(&doc, width);
+    let rows = plain_lines(&lines);
+
+    // Assert
+    assert!(rows.len() > 1, "expected the text to wrap: {rows:?}");
+    for (row, line) in rows.iter().zip(&lines) {
+        assert!(row.starts_with(&nested_prefix), "missing bars: {row:?}");
+        assert!(line.width() <= usize::from(width), "too wide: {row:?}");
+    }
+    let remaining: Vec<&str> = rows
+        .iter()
+        .flat_map(|row| row[nested_prefix.len()..].split(' '))
+        .collect();
+    assert_eq!(remaining.join(" "), words);
 }
 
 #[test]
@@ -274,6 +300,64 @@ fn wide_characters_count_by_display_width() {
     assert!(lines.len() > 1, "expected the paragraph to wrap");
     for line in &lines {
         assert!(line.width() <= 10, "line too wide: {:?}", plain(line));
+    }
+}
+
+const LONG_ASCII_WORD_LEN: usize = 200_000;
+const LONG_CJK_WORD_LEN: usize = 100_000;
+const LONG_WORD_WIDTH: u16 = 80;
+const LONG_WORD_BUDGET: Duration = Duration::from_secs(2);
+
+fn rows_of_word(word: &str, width: u16) -> Vec<String> {
+    plain_lines(&render(
+        &document(vec![Block::Paragraph(text(word))]),
+        width,
+    ))
+}
+
+#[test]
+fn a_very_long_word_wraps_in_linear_time() {
+    // Arrange
+    let words = [
+        "a".repeat(LONG_ASCII_WORD_LEN),
+        "漢".repeat(LONG_CJK_WORD_LEN),
+    ];
+
+    for word in &words {
+        let doc = document(vec![Block::Paragraph(text(word))]);
+
+        // Act
+        let started = Instant::now();
+        let lines = render(&doc, LONG_WORD_WIDTH);
+        let elapsed = started.elapsed();
+
+        // Assert
+        assert!(elapsed < LONG_WORD_BUDGET, "wrapping took {elapsed:?}");
+        for line in &lines {
+            assert!(line.width() <= usize::from(LONG_WORD_WIDTH));
+        }
+        assert_eq!(plain_lines(&lines).concat(), *word);
+    }
+}
+
+#[test]
+fn a_long_word_wraps_to_the_same_rows_as_before() {
+    // Arrange
+    let cases: [(&str, u16, Vec<&str>); 6] = [
+        ("abc", 1, vec!["a", "b", "c"]),
+        ("漢字", 1, vec!["漢", "字"]),
+        ("a漢b", 2, vec!["a", "漢", "b"]),
+        ("ab漢cd", 3, vec!["ab", "漢c", "d"]),
+        ("abcd", 4, vec!["abcd"]),
+        ("abcdefgh", 4, vec!["abcd", "efgh"]),
+    ];
+
+    for (word, width, expected) in cases {
+        // Act
+        let rows = rows_of_word(word, width);
+
+        // Assert
+        assert_eq!(rows, expected, "word {word:?} at width {width}");
     }
 }
 
