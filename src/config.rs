@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::RangeInclusive;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -107,6 +108,13 @@ pub const NAMED_KEYS: [&str; 10] = [
 const CTRL_PREFIX: &str = "Ctrl-";
 
 /// Keys that keep their built-in meaning and cannot be rebound.
+const CONFIG_ENV: &str = "HELIOS_CONFIG";
+const XDG_CONFIG_ENV: &str = "XDG_CONFIG_HOME";
+const HOME_ENV: &str = "HOME";
+const HOME_CONFIG_DIR: &str = ".config";
+const CONFIG_DIR: &str = "helios";
+const CONFIG_FILE: &str = "config.toml";
+
 pub const RESERVED_KEYS: [&str; 4] = ["q", "Ctrl-C", "?", "Esc"];
 
 /// The settings, one field per file section.
@@ -530,4 +538,64 @@ pub fn normalize_key(key: &str) -> Result<String, String> {
             .ok_or_else(invalid),
         _ => single(key).map(String::from).ok_or_else(invalid),
     }
+}
+
+/// Why the settings file could not be loaded; each message names the file.
+#[derive(Debug, thiserror::Error)]
+pub enum LoadError {
+    #[error("{}: cannot read the file: {source}", path.display())]
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("{}: {source}", path.display())]
+    Parse { path: PathBuf, source: ConfigError },
+}
+
+/// The settings file location: `HELIOS_CONFIG`, else the XDG directory, else under `HOME`.
+pub fn config_path(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let set = |name: &str| env(name).filter(|value| !value.is_empty());
+    if let Some(path) = set(CONFIG_ENV) {
+        return Some(PathBuf::from(path));
+    }
+    if let Some(dir) = set(XDG_CONFIG_ENV) {
+        return Some(PathBuf::from(dir).join(CONFIG_DIR).join(CONFIG_FILE));
+    }
+    set(HOME_ENV).map(|home| {
+        PathBuf::from(home)
+            .join(HOME_CONFIG_DIR)
+            .join(CONFIG_DIR)
+            .join(CONFIG_FILE)
+    })
+}
+
+/// Reads the settings; no path or no file at the path gives the defaults.
+pub fn load(path: Option<&Path>) -> Result<Config, LoadError> {
+    let Some(path) = path else {
+        return Ok(Config::default());
+    };
+    match std::fs::read_to_string(path) {
+        Ok(text) => parse(&text).map_err(|source| LoadError::Parse {
+            path: path.to_path_buf(),
+            source,
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+        Err(source) => Err(LoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// The theme named by `name`, when it is one of the five.
+pub fn theme_named(name: &str) -> Option<Theme> {
+    Theme::ALL.into_iter().find(|theme| theme.name() == name)
+}
+
+/// The theme to start with: the flag, then the environment, then the file.
+pub fn resolve_theme(flag: Option<&str>, env: Option<&str>, file: &str) -> Theme {
+    flag.and_then(theme_named)
+        .or_else(|| env.and_then(theme_named))
+        .or_else(|| theme_named(file))
+        .unwrap_or_default()
 }
