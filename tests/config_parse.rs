@@ -194,15 +194,15 @@ fn an_error_carries_the_line_of_the_key() {
 #[test]
 fn a_duplicate_key_binding_in_one_scope_is_an_error() {
     // Arrange
-    let twice = "[keys.files]\nopen_all = [\"x\"]\nclose_all = [\"x\"]\n";
-    let two_scopes = "[keys.files]\nopen_all = [\"x\"]\n[keys.diff]\nback = [\"x\"]\n";
+    let twice = "[keys.files]\nopen_all = [\"z\"]\nclose_all = [\"z\"]\n";
+    let two_scopes = "[keys.files]\nopen_all = [\"z\"]\n[keys.diff]\nback = [\"z\"]\n";
 
     // Act
     let error = parse(twice).expect_err("one key for two actions is rejected");
     let fine = parse(two_scopes);
 
     // Assert
-    assert!(error.to_string().contains('x'), "`{error}` names the key");
+    assert!(error.to_string().contains('z'), "`{error}` names the key");
     assert!(
         error.to_string().contains("files"),
         "`{error}` names the scope"
@@ -226,5 +226,56 @@ fn a_reserved_key_cannot_be_rebound() {
             error.to_string().contains(key),
             "`{error}` should name `{key}`"
         );
+    }
+}
+
+#[test]
+fn a_rebind_onto_a_default_key_of_another_action_is_an_error() {
+    // Arrange
+    let clash = "[keys.list]\nmove_down = [\"r\"]\n";
+    let both = "[keys.list]\nmove_down = [\"r\"]\nrefresh = [\"R\"]\n";
+
+    // Act
+    let error = parse(clash).expect_err("the rebind leaves refresh without its key");
+    let fine = parse(both);
+
+    // Assert
+    let message = error.to_string();
+    for part in ["`r`", "list", "refresh"] {
+        assert!(message.contains(part), "`{message}` should name {part}");
+    }
+    assert!(fine.is_ok(), "rebinding both actions parses: {fine:?}");
+}
+
+#[test]
+fn a_key_listed_twice_for_one_action_is_an_error_with_its_own_message() {
+    // Arrange
+    let text = "[keys.list]\nmove_down = [\"j\", \"j\"]\n";
+
+    // Act
+    let error = parse(text).expect_err("a repeated key is rejected");
+
+    // Assert
+    assert!(
+        error
+            .message
+            .contains("`j` is listed twice for `move_down`"),
+        "`{}` has the repeat message",
+        error.message
+    );
+}
+
+#[test]
+fn a_rebind_onto_a_global_key_is_an_error() {
+    // Arrange
+    let text = "[keys.list]\nmove_down = [\"o\"]\n";
+
+    // Act
+    let error = parse(text).expect_err("`o` runs open_in_browser first");
+
+    // Assert
+    let message = error.to_string();
+    for part in ["`o`", "list", "open_in_browser"] {
+        assert!(message.contains(part), "`{message}` should name {part}");
     }
 }

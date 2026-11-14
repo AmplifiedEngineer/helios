@@ -23,6 +23,65 @@ fn temp_dir(test: &str) -> PathBuf {
     dir
 }
 
+/// The text with every `# action = [...]` line inside a `[keys.*]` table uncommented.
+fn uncomment_key_lines(text: &str) -> String {
+    let mut in_keys = false;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let header = line.trim_start_matches("# ");
+        if header.starts_with('[') {
+            in_keys = header.starts_with("[keys.");
+        }
+        let is_key_line = in_keys && line.starts_with("# ") && line.contains(" = [");
+        let is_table = line.starts_with("# [keys.");
+        out.push(if is_key_line || is_table {
+            &line[2..]
+        } else {
+            line
+        });
+    }
+    out.join("\n")
+}
+
+#[test]
+fn every_printed_default_key_line_loads_when_uncommented() {
+    // Arrange
+    let printed = to_toml(&Config::default());
+    let uncommented = uncomment_key_lines(&printed);
+    let lines: Vec<&str> = uncommented
+        .lines()
+        .filter(|line| line.contains(" = [") && !printed.lines().any(|p| p == *line))
+        .collect();
+
+    // Act
+    let all_together = parse(&uncommented);
+    let each_alone: Vec<_> = lines
+        .iter()
+        .map(|line| {
+            let table = printed
+                .lines()
+                .take_while(|p| *p != format!("# {line}"))
+                .filter(|p| p.starts_with("# [keys."))
+                .last()
+                .map(|p| &p[2..]);
+            (
+                *line,
+                table.map(|table| parse(&format!("{table}\n{line}\n"))),
+            )
+        })
+        .collect();
+
+    // Assert
+    assert!(!lines.is_empty(), "some default key lines are printed");
+    assert!(all_together.is_ok(), "all lines together: {all_together:?}");
+    for (line, result) in each_alone {
+        assert!(
+            result.is_some_and(|result| result.is_ok()),
+            "`{line}` alone does not load"
+        );
+    }
+}
+
 #[test]
 fn print_config_shows_the_effective_settings_and_round_trips() {
     // Arrange

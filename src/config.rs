@@ -514,6 +514,7 @@ fn scope_bindings(
 ) -> Result<BTreeMap<String, Vec<String>>, ConfigError> {
     let table = format!("keys.{scope}");
     let mut owner_of: BTreeMap<String, String> = BTreeMap::new();
+    let kept_defaults = kept_default_keys(valid_actions, &actions);
     let mut bound = BTreeMap::new();
     for (action, keys) in actions {
         if !valid_actions.contains(&action.as_str()) {
@@ -537,20 +538,42 @@ fn scope_bindings(
                     format!("key `{key}` is reserved and cannot be rebound"),
                 ));
             }
-            if let Some(other) = owner_of.insert(key.clone(), action.clone()) {
+            if let Some(other) = kept_defaults.get(key.as_str()) {
                 return Err(source.error(
                     &table,
                     &action,
                     format!(
-                        "key `{key}` is bound to both `{other}` and `{action}` in scope {scope}"
+                        "key `{key}` is already used by `{other}` in {scope}; rebind `{other}` too"
                     ),
                 ));
+            }
+            if let Some(other) = owner_of.insert(key.clone(), action.clone()) {
+                let message = if other == action {
+                    format!("key `{key}` is listed twice for `{action}` in scope {scope}")
+                } else {
+                    format!(
+                        "key `{key}` is bound to both `{other}` and `{action}` in scope {scope}"
+                    )
+                };
+                return Err(source.error(&table, &action, message));
             }
             canonical.push(key);
         }
         bound.insert(action, canonical);
     }
     Ok(bound)
+}
+
+/// The built-in keys of the actions the file leaves alone, each with its action.
+fn kept_default_keys<'a>(
+    valid_actions: &[&'a str],
+    overridden: &RawActions,
+) -> BTreeMap<&'static str, &'a str> {
+    valid_actions
+        .iter()
+        .filter(|action| !overridden.contains_key(**action))
+        .flat_map(|action| default_keys(action).iter().map(move |key| (*key, *action)))
+        .collect()
 }
 
 /// Checks a key string and returns its canonical spelling.
@@ -645,6 +668,7 @@ pub fn to_toml(config: &Config) -> String {
         format!("needs_me = {}", toml_list(&config.columns.needs_me)),
         String::new(),
         KEYS_NOTE.to_string(),
+        RESERVED_NOTE.to_string(),
     ];
     for (scope, actions) in SCOPE_ACTIONS {
         lines.extend(scope_lines(&config.keys, scope, actions));
@@ -666,6 +690,15 @@ pub fn to_toml(config: &Config) -> String {
 const KEYS_NOTE: &str =
     "# A line that starts with # shows a default key. Remove the # to change it.";
 
+const RESERVED_NOTE: &str = "# The quit, help and back actions keep their reserved keys.";
+
+/// An action whose default keys include a reserved one cannot be offered as an example to edit.
+fn has_reserved_key(action: &str) -> bool {
+    default_keys(action)
+        .iter()
+        .any(|key| RESERVED_KEYS.contains(key))
+}
+
 fn scope_lines(keys: &KeysConfig, scope: &str, actions: &[&str]) -> Vec<String> {
     let table = keys.scopes.get(scope);
     let header = format!("[keys.{scope}]");
@@ -678,13 +711,14 @@ fn scope_lines(keys: &KeysConfig, scope: &str, actions: &[&str]) -> Vec<String> 
         },
     ];
     for action in actions {
-        lines.push(match keys.override_of(scope, action) {
-            Some(bound) => format!("{action} = {}", toml_list(bound)),
+        match keys.override_of(scope, action) {
+            Some(bound) => lines.push(format!("{action} = {}", toml_list(bound))),
+            None if has_reserved_key(action) => {}
             None => {
                 let defaults = names(default_keys(action));
-                format!("# {action} = {}", toml_list(&defaults))
+                lines.push(format!("# {action} = {}", toml_list(&defaults)));
             }
-        });
+        }
     }
     lines
 }
