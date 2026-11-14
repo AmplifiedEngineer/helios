@@ -129,7 +129,7 @@ fn tab_and_shift_tab_move_between_the_detail_tabs() {
 }
 
 #[test]
-fn the_files_tab_lists_the_files_and_enter_opens_a_diff_that_esc_closes() {
+fn the_files_tab_lists_the_files_and_v_opens_a_diff_that_esc_closes() {
     // Arrange
     let mut harness = Harness::start(FakeApi::new());
     open_files_tab(&mut harness);
@@ -138,7 +138,7 @@ fn the_files_tab_lists_the_files_and_enter_opens_a_diff_that_esc_closes() {
     let second = harness.cursor_line();
 
     // Act
-    harness.press(KeyCode::Enter);
+    harness.type_char('v');
     let diff = harness.screen();
     harness.press(KeyCode::Esc);
 

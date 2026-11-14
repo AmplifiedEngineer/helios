@@ -1,6 +1,6 @@
 ┌Overview  Conversation  Commits  [Files]  Checks────────────────────────────────────────org/repo#2┐
-│src/a.rs                                                                                          │
-│src/b.rs                                                                                          │
+│▸ src/a.rs  +1 -0                                                                                 │
+│▸ src/b.rs  +1 -0                                                                                 │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
@@ -12,5 +12,5 @@
 │                                                                                                  │
 │                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-j/k move  g/G first/last  Enter/l open  Esc/h back  Tab next tab  Shift-Tab previous tab
-o open in browser  ? help  q quit  Ctrl-C quit
+j/k move  g/G first/last  Enter/Space toggle file  e/E open/close all  x tests group  v full diff
+Esc/h back  Tab next tab  Shift-Tab previous tab  o open in browser  ? help  q quit  Ctrl-C quit

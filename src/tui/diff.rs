@@ -35,6 +35,59 @@ pub const ADDED_OR_REMOVED_NO_TEXT_LINE: &str = "no text diff: empty or binary f
 /// Drawn for any other file with no patch and no changes.
 pub const CHANGED_NO_TEXT_LINE: &str = "no text diff: binary file or mode change only";
 
+/// The most patch lines drawn under an open file in the Files tab.
+pub const MAX_INLINE_DIFF_LINES: usize = 200;
+
+/// Drawn after the capped lines of a patch that has more.
+fn inline_cut_line() -> String {
+    format!("Showing the first {MAX_INLINE_DIFF_LINES} lines. Press v for the full diff.")
+}
+
+/// The added and removed line counts of a patch. File headers before the first hunk do not count.
+pub fn count_changes(patch: &str) -> (usize, usize) {
+    let hunks = patch
+        .lines()
+        .skip_while(|line| !line.starts_with(HUNK_MARKER));
+    let (mut added, mut removed) = (0, 0);
+    for line in hunks {
+        if line.starts_with(ADD_MARKER) {
+            added += 1;
+        } else if line.starts_with(DELETE_MARKER) {
+            removed += 1;
+        }
+    }
+    (added, removed)
+}
+
+/// The rows of `file` drawn under its row in the Files tab, each starting with `indent`: the first
+/// `MAX_INLINE_DIFF_LINES` patch lines wrapped to `width`, then a note when more follow.
+pub fn inline_lines(file: &ChangedFile, width: usize, indent: &str) -> Vec<Line<'static>> {
+    let options = DiffOptions { color: true };
+    let inner = width.saturating_sub(indent.chars().count());
+    let rows = match &file.diff {
+        FileDiff::Patch(patch) => {
+            let mut numbers = LineNumbers::default();
+            let mut rows: Vec<Line<'static>> = patch
+                .as_str()
+                .lines()
+                .take(MAX_INLINE_DIFF_LINES)
+                .flat_map(|line| numbers.line(line, options, inner))
+                .collect();
+            if patch.as_str().lines().nth(MAX_INLINE_DIFF_LINES).is_some() {
+                rows.push(Line::from(inline_cut_line()));
+            }
+            rows
+        }
+        FileDiff::Unavailable { gap, .. } => gap_line(gap).map(Line::from).into_iter().collect(),
+    };
+    rows.into_iter()
+        .map(|mut row| {
+            row.spans.insert(0, Span::raw(indent.to_owned()));
+            row
+        })
+        .collect()
+}
+
 /// How the diff is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffOptions {

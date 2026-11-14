@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
+use crate::test_files::TestPatterns;
 use worker::Loaded;
 
 pub mod loader;
@@ -15,7 +16,7 @@ mod nav;
 pub mod refresh;
 pub mod worker;
 
-pub use nav::Step;
+pub use nav::{FileRow, Step};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Screen {
@@ -129,6 +130,10 @@ pub struct App {
     files_truncated: bool,
     files_requested: bool,
     file_cursor: usize,
+    test_patterns: TestPatterns,
+    /// Indexes into `files` of the files drawn open.
+    open_files: BTreeSet<usize>,
+    tests_open: bool,
     diff_scroll: usize,
     detail_scroll: usize,
     /// The furthest the open tab can scroll; the detail view records it each draw.
@@ -417,6 +422,8 @@ impl App {
         self.files_truncated = false;
         self.files_requested = false;
         self.file_cursor = 0;
+        self.open_files.clear();
+        self.tests_open = false;
         self.diff_scroll = 0;
         self.detail_scroll = 0;
     }

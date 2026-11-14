@@ -80,7 +80,27 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         key: "Enter/l",
         action: "open",
-        scopes: &[Scope::Mine, Scope::NeedsMe, Scope::Files],
+        scopes: LISTS,
+    },
+    Binding {
+        key: "Enter/Space",
+        action: "toggle file",
+        scopes: &[Scope::Files],
+    },
+    Binding {
+        key: "e/E",
+        action: "open/close all",
+        scopes: &[Scope::Files],
+    },
+    Binding {
+        key: "x",
+        action: "tests group",
+        scopes: &[Scope::Files],
+    },
+    Binding {
+        key: "v",
+        action: "full diff",
+        scopes: &[Scope::Files],
     },
     Binding {
         key: "Esc/h",
@@ -214,7 +234,11 @@ fn detail_key(app: &mut App, code: KeyCode) -> Outcome {
     match code {
         KeyCode::Tab => app.next_tab(),
         KeyCode::BackTab => app.previous_tab(),
-        code if is_open(code) && on_files => app.open_file(),
+        KeyCode::Enter | KeyCode::Char(' ') if on_files => app.toggle_selected_row(),
+        KeyCode::Char('e') if on_files => app.open_all_files(),
+        KeyCode::Char('E') if on_files => app.close_all_files(),
+        KeyCode::Char('x') if on_files => app.toggle_tests(),
+        KeyCode::Char('v') if on_files => app.open_file(),
         code if is_back(code) => app.back(),
         code if on_files => {
             if let Some(step) = step_for(code) {

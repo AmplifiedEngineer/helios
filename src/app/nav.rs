@@ -4,6 +4,7 @@
 
 use super::{App, DetailTab, ListView, LoadRequest, Pane, Screen};
 use crate::model::{ChangedFile, FileDiff, PrKey, PrSummary};
+use crate::test_files::is_test_path;
 use crate::tui::diff::MAX_DIFF_LINES;
 
 /// One move of a cursor or a scroll position.
@@ -13,6 +14,14 @@ pub enum Step {
     Previous,
     First,
     Last,
+}
+
+/// One row of the Files tab: a file, by its index in `files()`, or the tests group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRow {
+    File(usize),
+    /// The tests group row, with the number of test files it holds.
+    Tests(usize),
 }
 
 impl Step {
@@ -162,20 +171,103 @@ impl App {
         }
     }
 
-    /// The row index of the file the Files tab has selected.
+    /// The rows the Files tab shows: source files, then the tests group row and, while the
+    /// group is open, the test files.
+    pub fn file_rows(&self) -> Vec<FileRow> {
+        let files = self.files().unwrap_or_default();
+        let is_test = |file: &ChangedFile| is_test_path(file.path.as_str(), &self.test_patterns);
+        let sources = files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| !is_test(file))
+            .map(|(index, _)| FileRow::File(index));
+        let tests: Vec<usize> = files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| is_test(file))
+            .map(|(index, _)| index)
+            .collect();
+        let mut rows: Vec<FileRow> = sources.collect();
+        if !tests.is_empty() {
+            rows.push(FileRow::Tests(tests.len()));
+            if self.tests_open {
+                rows.extend(tests.into_iter().map(FileRow::File));
+            }
+        }
+        rows
+    }
+
+    /// The index into `file_rows()` of the row the Files tab has selected.
     pub fn file_cursor(&self) -> usize {
         self.file_cursor
-            .min(self.files().map_or(0, <[_]>::len).saturating_sub(1))
+            .min(self.file_rows().len().saturating_sub(1))
     }
 
     pub fn move_file(&mut self, step: Step) {
-        let len = self.files().map_or(0, <[_]>::len);
-        self.file_cursor = step.land(self.file_cursor(), len);
+        self.file_cursor = step.land(self.file_cursor(), self.file_rows().len());
     }
 
-    /// The file the Files tab has selected.
+    /// The file the Files tab has selected; none on the tests group row.
     pub fn selected_file(&self) -> Option<&ChangedFile> {
-        self.files()?.get(self.file_cursor())
+        match self.file_rows().get(self.file_cursor())? {
+            FileRow::File(index) => self.files()?.get(*index),
+            FileRow::Tests(_) => None,
+        }
+    }
+
+    /// Whether the file at `index` in `files()` is drawn open.
+    pub fn is_file_open(&self, index: usize) -> bool {
+        self.open_files.contains(&index)
+    }
+
+    pub fn tests_open(&self) -> bool {
+        self.tests_open
+    }
+
+    /// Opens or closes the row under the file cursor: a file, or the tests group.
+    pub fn toggle_selected_row(&mut self) {
+        match self.file_rows().get(self.file_cursor()) {
+            Some(FileRow::File(index)) => {
+                if !self.open_files.remove(index) {
+                    self.open_files.insert(*index);
+                }
+            }
+            Some(FileRow::Tests(_)) => self.toggle_tests(),
+            None => {}
+        }
+    }
+
+    /// Opens or closes the tests group; closing it with the cursor inside puts the cursor on
+    /// the group row.
+    pub fn toggle_tests(&mut self) {
+        if self.tests_open {
+            self.close_tests();
+        } else {
+            self.tests_open = true;
+        }
+    }
+
+    pub fn open_all_files(&mut self) {
+        let count = self.files().map_or(0, <[_]>::len);
+        self.open_files = (0..count).collect();
+        self.tests_open = true;
+    }
+
+    pub fn close_all_files(&mut self) {
+        self.open_files.clear();
+        self.close_tests();
+    }
+
+    fn close_tests(&mut self) {
+        let cursor = self.file_cursor();
+        self.tests_open = false;
+        let group_row = self
+            .file_rows()
+            .iter()
+            .position(|row| matches!(row, FileRow::Tests(_)));
+        if let Some(group_row) = group_row.filter(|row| cursor > *row) {
+            self.file_cursor = group_row;
+        }
     }
 
     /// Opens the diff of the selected file.

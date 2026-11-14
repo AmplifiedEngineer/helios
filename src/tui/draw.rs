@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::refresh::Clock;
-use crate::app::{App, DetailTab, ListView, Screen};
+use crate::app::{App, DetailTab, FileRow, ListView, Screen};
 use crate::sanitize::sanitize;
 use crate::tui::cache::RenderCache;
 use crate::tui::keys::{self, Scope};
@@ -82,7 +82,7 @@ pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
 }
 
 /// The names in `names` on one line, the current one in brackets and bold.
-fn choice_line<T: PartialEq + Copy>(names: &[(T, &'static str)], current: T) -> Line<'static> {
+fn choice_line<T: PartialEq + Copy, S: AsRef<str>>(names: &[(T, S)], current: T) -> Line<'static> {
     let mut spans = Vec::new();
     for (value, name) in names {
         if !spans.is_empty() {
@@ -90,14 +90,28 @@ fn choice_line<T: PartialEq + Copy>(names: &[(T, &'static str)], current: T) -> 
         }
         if *value == current {
             spans.push(Span::styled(
-                format!("[{name}]"),
+                format!("[{}]", name.as_ref()),
                 Style::new().add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::raw(*name));
+            spans.push(Span::raw(name.as_ref().to_owned()));
         }
     }
     Line::from(spans)
+}
+
+/// The tab names, with the Files tab carrying the count of test files once they are known.
+fn tab_labels(app: &App) -> Vec<(DetailTab, String)> {
+    let tests = app.file_rows().iter().find_map(|row| match row {
+        FileRow::Tests(count) => Some(*count),
+        FileRow::File(_) => None,
+    });
+    TABS.iter()
+        .map(|(tab, name)| match (tab, tests) {
+            (DetailTab::Files, Some(count)) => (*tab, format!("{name} ({count} tests)")),
+            _ => (*tab, (*name).to_owned()),
+        })
+        .collect()
 }
 
 /// Whether a pane carries the focus marker, and if so whether it holds the focus.
@@ -181,7 +195,7 @@ fn draw_detail_pane(
             format!("{}#{}", sanitize(&key.repo), key.number)
         })
     });
-    let block = pane_block(choice_line(&TABS, app.tab), note, focus);
+    let block = pane_block(choice_line(&tab_labels(app), app.tab), note, focus);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if app.selected.is_some() {
