@@ -7,13 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use helios::app::loader::{Loader, Source};
-use helios::app::App;
+use helios::app::startup::startup_app;
 use helios::cli::{self, Config, DebugHooks};
-use helios::config::{self, resolve_theme, Config as Settings};
+use helios::config::{self, Config as Settings};
 use helios::github::clients::{build_clients, Client, ClientsError};
 use helios::github::octo::{Octo, REQUEST_TIMEOUT};
 use helios::smoke::{self, SmokeAccount};
-use helios::theme::{effective_theme, ColorDepth};
 use helios::tui::run::{Session, TerminalEvents};
 use helios::tui::{self, SystemClock};
 
@@ -30,15 +29,13 @@ fn clients(config: &Config) -> Result<Vec<Client>, ClientsError> {
 fn run(config: &Config, settings: &Settings, hooks: DebugHooks) -> io::Result<()> {
     tui::install_panic_hook();
     let runtime = tokio::runtime::Runtime::new()?;
-    let mut app = App::new();
     let lookup = |name: &str| std::env::var(name).ok();
-    app.set_depth(ColorDepth::detect(lookup));
-    let start_theme = resolve_theme(
+    let mut app = startup_app(
+        settings,
         config.theme.as_deref(),
         config.theme_env.as_deref(),
-        &settings.theme.name,
+        lookup,
     );
-    app.set_theme(effective_theme(start_theme, lookup));
     app.show_drafts = config.drafts;
     let clients = if hooks.fake_accounts {
         Vec::new()

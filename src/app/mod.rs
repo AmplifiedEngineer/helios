@@ -6,15 +6,18 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, SystemTime};
 
+use crate::config::DEFAULT_PREVIEW_DELAY_MS;
 use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
 use crate::test_files::TestPatterns;
 use crate::theme::{ColorDepth, Theme};
+use crate::tui::layout::{is_split, LayoutSettings};
 use worker::Loaded;
 
 pub mod loader;
 mod nav;
 pub mod refresh;
+pub mod startup;
 pub mod worker;
 
 pub use nav::{FileRow, Step};
@@ -97,7 +100,17 @@ const LISTS_PER_ACCOUNT: usize = 2;
 const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
 
 /// How long the cursor rests on a row before the detail pane loads that pull request.
-pub const PREVIEW_DELAY_MS: u64 = 300;
+pub const PREVIEW_DELAY_MS: u64 = DEFAULT_PREVIEW_DELAY_MS;
+
+/// The preview delay, which starts at the default rather than at zero.
+#[derive(Debug, Clone, Copy)]
+struct PreviewDelay(Duration);
+
+impl Default for PreviewDelay {
+    fn default() -> Self {
+        Self(Duration::from_millis(PREVIEW_DELAY_MS))
+    }
+}
 
 /// The host and login of one account.
 pub type AccountKey = (String, String);
@@ -118,6 +131,14 @@ pub struct App {
     /// The focused pane; it only matters while the screen is split.
     pub pane: Pane,
     split: bool,
+    layout: LayoutSettings,
+    preview_delay: PreviewDelay,
+    /// Column names for the Mine list; empty picks the columns automatically.
+    mine_columns: Vec<String>,
+    /// Column names for the Needs me list; empty picks the columns automatically.
+    needs_me_columns: Vec<String>,
+    /// Whether the files of a pull request start open.
+    files_start_open: bool,
     pub selected: Option<PrKey>,
     pub filter: ListFilter,
     pub show_drafts: bool,
@@ -199,6 +220,46 @@ impl App {
         if !split {
             self.pane = Pane::List;
         }
+    }
+
+    /// Sets the split flag for a terminal `width` columns wide.
+    pub fn sync_split(&mut self, width: u16) {
+        self.set_split(is_split(width, &self.layout));
+    }
+
+    pub fn layout(&self) -> LayoutSettings {
+        self.layout
+    }
+
+    pub fn set_layout(&mut self, layout: LayoutSettings) {
+        self.layout = layout;
+    }
+
+    pub fn set_preview_delay_ms(&mut self, delay_ms: u64) {
+        self.preview_delay = PreviewDelay(Duration::from_millis(delay_ms));
+    }
+
+    /// Sets the column names each list draws; an empty list picks the columns automatically.
+    pub fn set_columns(&mut self, mine: Vec<String>, needs_me: Vec<String>) {
+        self.mine_columns = mine;
+        self.needs_me_columns = needs_me;
+    }
+
+    /// The column names the shown list is set to draw.
+    pub fn column_names(&self) -> &[String] {
+        match self.view {
+            ListView::Mine => &self.mine_columns,
+            ListView::NeedsMe => &self.needs_me_columns,
+        }
+    }
+
+    pub fn set_test_patterns(&mut self, patterns: TestPatterns) {
+        self.test_patterns = patterns;
+    }
+
+    /// Sets whether the files of a pull request start open once they load.
+    pub fn set_files_start_open(&mut self, open: bool) {
+        self.files_start_open = open;
     }
 
     /// Whether the list and detail panes show side by side.
@@ -298,9 +359,7 @@ impl App {
         if !std::mem::take(&mut self.cursor_moved) {
             return;
         }
-        self.preview_deadline = self
-            .split
-            .then(|| now + Duration::from_millis(PREVIEW_DELAY_MS));
+        self.preview_deadline = self.split.then(|| now + self.preview_delay.0);
     }
 
     /// Asks for the detail of the highlighted pull request once the deadline has passed and no
@@ -349,6 +408,10 @@ impl App {
     /// Keeps the changed files of the open pull request for the Files tab.
     pub fn apply_files(&mut self, key: &PrKey, files: Vec<ChangedFile>) {
         if self.selected.as_ref() == Some(key) {
+            if self.files_start_open {
+                self.open_files = (0..files.len()).collect();
+                self.tests_open = true;
+            }
             self.files = Some(files);
         }
     }
