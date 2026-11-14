@@ -5,6 +5,8 @@
 #[allow(dead_code)]
 mod support;
 
+use std::time::{Duration, Instant};
+
 use helios::markdown::{from_remote, Document};
 use helios::sanitize::sanitize;
 use helios::theme::{ColorDepth, Theme};
@@ -136,4 +138,38 @@ fn highlighting_leaves_the_text_of_every_line_unchanged() {
 
     // Assert
     assert_eq!(plain(&colored), plain(&render(&document, WIDTH)));
+}
+
+const HUGE_BLOCK_LINES: usize = 20_000;
+/// The first line index drawn plain, matching the highlight cap.
+const FIRST_PLAIN_LINE: usize = 500;
+const HUGE_BLOCK_BUDGET: Duration = Duration::from_secs(5);
+
+/// The color of the `fn` span on a rendered code line.
+fn fn_color(line: &Line<'_>) -> Option<Color> {
+    line.spans
+        .iter()
+        .find(|span| span.content.as_ref() == "fn")
+        .and_then(|span| span.style.fg)
+}
+
+#[test]
+fn a_huge_code_block_highlights_only_its_first_lines() {
+    // Arrange
+    let body = "fn f() {}\n".repeat(HUGE_BLOCK_LINES);
+    let document = parse(&format!("```rust\n{body}```"));
+    let started = Instant::now();
+
+    // Act
+    let lines = render_styled(&document, WIDTH, &styles(Theme::Standard));
+
+    // Assert
+    assert_eq!(fn_color(&lines[0]), Some(STANDARD_KEYWORD), "first line");
+    assert_eq!(fn_color(&lines[FIRST_PLAIN_LINE]), None, "line 501");
+    assert_eq!(plain(&lines)[FIRST_PLAIN_LINE], "    fn f() {}");
+    assert_eq!(lines.len(), HUGE_BLOCK_LINES);
+    assert!(
+        started.elapsed() < HUGE_BLOCK_BUDGET,
+        "render took too long"
+    );
 }

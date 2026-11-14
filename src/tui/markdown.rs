@@ -27,6 +27,8 @@ pub const CUT_NOTE: &str = "[showing part of this text]";
 pub const MAX_URL_DISPLAY: usize = 80;
 const QUOTE_BAR: &str = "| ";
 const ELLIPSIS: &str = "...";
+/// Lines of one code block sent to the highlighter; later lines draw plain.
+const MAX_HIGHLIGHT_BLOCK_LINES: usize = 500;
 
 /// One display column with the style it is drawn in.
 type Cell = (char, Style);
@@ -96,8 +98,9 @@ fn render_block(block: &Block, width: usize, styles: &Styles) -> Vec<Line<'stati
 /// Draws a code block; a known language colors each token by its role.
 fn render_code(lang: Option<&str>, text: &str, styles: &Styles) -> Vec<Line<'static>> {
     let lines: Vec<&str> = text.lines().collect();
+    let budget = &lines[..lines.len().min(MAX_HIGHLIGHT_BLOCK_LINES)];
     let mut rows = lang
-        .map(|lang| highlight(lang, &lines))
+        .map(|lang| highlight(lang, budget))
         .unwrap_or_default()
         .into_iter();
     lines
