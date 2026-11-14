@@ -86,7 +86,7 @@ pub fn render_cached(
 ) {
     let bodies = Bodies {
         cache,
-        pr_key: app.current_pr().map(pr_key_text).unwrap_or_default(),
+        pr_key: app.selected.as_ref().map(pr_key_text).unwrap_or_default(),
         width: area.width,
     };
     let lines = match app.detail() {

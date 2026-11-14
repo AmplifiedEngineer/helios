@@ -2,7 +2,7 @@
 
 //! Moving around: the list cursor, the open pull request, its tabs, files and diff.
 
-use super::{App, DetailTab, ListView, LoadRequest, Screen};
+use super::{App, DetailTab, ListView, LoadRequest, Pane, Screen};
 use crate::model::{ChangedFile, FileDiff, PrKey, PrSummary};
 use crate::tui::diff::MAX_DIFF_LINES;
 
@@ -71,12 +71,14 @@ impl App {
     pub fn move_cursor(&mut self, step: Step) {
         let landed = step.land(self.list_cursor(), self.list_rows().len());
         *self.cursor_slot() = landed;
+        self.cursor_moved = true;
     }
 
     /// Switches between the Mine and Needs me lists, with the cursor on the first row.
     pub fn toggle_view(&mut self) {
         self.view = self.view.other();
         *self.cursor_slot() = 0;
+        self.cursor_moved = true;
     }
 
     /// Runs `change`, then puts the list cursor back on the row it was on, when that row remains.
@@ -89,22 +91,34 @@ impl App {
         }
     }
 
-    /// Opens the pull request under the list cursor on its Overview tab.
+    /// Opens the pull request under the list cursor on its Overview tab: on the detail screen,
+    /// or in the detail pane when the screen is split.
     pub fn open_highlighted(&mut self) {
         let Some(key) = self.highlighted().map(|row| row.key.clone()) else {
             return;
         };
         self.open(key);
-        self.screen = Screen::Detail;
         self.tab = DetailTab::Overview;
+        if self.split {
+            self.pane = Pane::Detail;
+        } else {
+            self.screen = Screen::Detail;
+        }
     }
 
-    /// Goes back one screen: from the diff to the detail, from the detail to the list.
+    /// Goes back one step: from the diff to the detail, from the detail to the list.
     pub fn back(&mut self) {
-        self.screen = match self.screen {
-            Screen::Diff => Screen::Detail,
-            Screen::Detail | Screen::List => Screen::List,
-        };
+        match self.screen {
+            Screen::Diff if self.split => {
+                self.screen = Screen::List;
+                self.pane = Pane::Detail;
+            }
+            Screen::Diff => self.screen = Screen::Detail,
+            Screen::Detail | Screen::List => {
+                self.screen = Screen::List;
+                self.pane = Pane::List;
+            }
+        }
         self.show_help = false;
         self.detail_scroll = 0;
     }

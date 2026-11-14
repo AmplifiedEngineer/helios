@@ -1,16 +1,16 @@
-Overview  Conversation  Commits  [Files]  Checks
-src/a.rs
-src/b.rs
-
-
-
-
-
-
-
-
-
-
-
-j/k move  g/G first/last  Enter open  Esc back  Tab next tab  Shift-Tab previous tab
+┌Overview  Conversation  Commits  [Files]  Checks────────────────────────────────────────org/repo#2┐
+│src/a.rs                                                                                          │
+│src/b.rs                                                                                          │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+j/k move  g/G first/last  Enter/l open  Esc/h back  Tab next tab  Shift-Tab previous tab
 o open in browser  ? help  q quit  Ctrl-C quit

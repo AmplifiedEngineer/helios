@@ -21,6 +21,7 @@ use crate::github::GithubApi;
 use crate::tui::cache::RenderCache;
 use crate::tui::draw::draw_cached;
 use crate::tui::keys::{handle_key, Outcome};
+use crate::tui::layout::{is_split, LayoutSettings};
 
 /// How long one step waits for a key before it looks at the background results again.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -168,6 +169,7 @@ where
             Some(event) => self.handle_event(event),
             None => Flow::Running,
         };
+        self.app.fire_preview(self.clock.now());
         self.run_requests();
         self.drain_results();
         if self.dirty {
@@ -176,8 +178,22 @@ where
         Ok(flow)
     }
 
+    /// Sets the split flag from `width`, or from the terminal's current width when unknown.
+    fn sync_split(&mut self, width: Option<u16>) {
+        let width = width.or_else(|| self.terminal.size().ok().map(|size| size.width));
+        if let Some(width) = width {
+            self.app
+                .set_split(is_split(width, &LayoutSettings::default()));
+        }
+    }
+
     fn handle_event(&mut self, event: Event) -> Flow {
         self.dirty = true;
+        let resized = match event {
+            Event::Resize(width, _) => Some(width),
+            _ => None,
+        };
+        self.sync_split(resized);
         let Event::Key(key) = event else {
             return Flow::Running;
         };
@@ -185,7 +201,9 @@ where
             return Flow::Running;
         }
         self.app.clear_alert();
-        match handle_key(&mut self.app, key) {
+        let outcome = handle_key(&mut self.app, key);
+        self.app.schedule_preview(self.clock.now());
+        match outcome {
             Outcome::Continue => Flow::Running,
             Outcome::Quit => Flow::Quit,
             Outcome::OpenInBrowser => {
@@ -229,6 +247,7 @@ where
                 }
                 Message::Detail(key, result) => {
                     self.note_failure(result.as_ref().as_ref().err());
+                    self.app.note_detail_answered(&key);
                     self.app.apply_detail(&key, *result);
                 }
                 Message::OpenFailed => self.app.set_alert(OPEN_FAILED_ALERT),

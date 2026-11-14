@@ -1,23 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Draws the screen the app is on: header, body, footer and the help overlay.
+//! Draws the screen the app is on: bordered panes, footer and the help overlay.
 
 use std::time::SystemTime;
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::refresh::Clock;
 use crate::app::{App, DetailTab, ListView, Screen};
+use crate::sanitize::sanitize;
 use crate::tui::cache::RenderCache;
 use crate::tui::keys::{self, Scope};
+use crate::tui::layout::{self, LayoutSettings, Panes, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 use crate::tui::{detail, diff, list};
 
-const HEADER_HEIGHT: u16 = 1;
 const HEADER_SEPARATOR: &str = "  ";
+const FOCUS_MARKER: &str = "> ";
+const FOCUSED_BORDER: BorderType = BorderType::Thick;
+const UNFOCUSED_BORDER: BorderType = BorderType::Plain;
+const ROW_COUNT_UNIT: &str = "PRs";
+const NO_SELECTION_TEXT: &str = "Select a pull request to preview it.";
+const TOO_SMALL_PREFIX: &str = "Terminal too small: needs at least";
 const LOADING_TEXT: &str = "Loading...";
 const EMPTY_TEXT: &str = "No pull requests.";
 const NO_ACCOUNTS_TEXT: &str =
@@ -52,24 +59,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 /// Draws the app, reusing rendered lines from `cache`.
 pub fn draw_cached(frame: &mut Frame, app: &App, clock: &impl Clock, cache: &RenderCache) {
+    let area = frame.area();
+    if area.width < MIN_TERMINAL_WIDTH || area.height < MIN_TERMINAL_HEIGHT {
+        let text = format!("{TOO_SMALL_PREFIX} {MIN_TERMINAL_WIDTH}x{MIN_TERMINAL_HEIGHT}");
+        frame.render_widget(Paragraph::new(text), area);
+        return;
+    }
     let scope = Scope::of(app);
-    let footer_height = keys::footer_height(scope, frame.area().width);
-    let [header, body, footer] = Layout::vertical([
-        Constraint::Length(HEADER_HEIGHT),
-        Constraint::Min(0),
-        Constraint::Length(footer_height),
-    ])
-    .areas(frame.area());
-    let mut header_text = header_line(app);
-    if let Some(alert) = app.alert() {
-        header_text.push_span(Span::raw(format!("{HEADER_SEPARATOR}{alert}")));
-    }
-    frame.render_widget(Paragraph::new(header_text), header);
-    match app.screen {
-        Screen::List => draw_list(frame, body, app, clock),
-        Screen::Detail => detail::render_cached(frame, body, app, clock, cache),
-        Screen::Diff => draw_diff(frame, body, app),
-    }
+    let footer_height = keys::footer_height(scope, area.width);
+    let [body, footer] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(area);
+    draw_panes(frame, body, app, clock, cache);
     keys::render_footer_for(frame, footer, Some(scope));
     if app.show_help {
         draw_help(frame, body, scope);
@@ -100,18 +100,103 @@ fn choice_line<T: PartialEq + Copy>(names: &[(T, &'static str)], current: T) -> 
     Line::from(spans)
 }
 
-fn header_line(app: &App) -> Line<'static> {
-    match app.screen {
-        Screen::List => {
-            let mut line = choice_line(&VIEWS, app.view);
-            if let Some(frame) = app.spinner() {
-                line.push_span(Span::raw(format!("{HEADER_SEPARATOR}{frame}")));
-            }
-            line
-        }
-        Screen::Detail => choice_line(&TABS, app.tab),
-        Screen::Diff => Line::from(DIFF_HEADER),
+/// Whether a pane carries the focus marker, and if so whether it holds the focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Unmarked,
+    Focused,
+    Unfocused,
+}
+
+/// A bordered pane with `title` on the left and `note` on the right.
+fn pane_block(mut title: Line<'static>, note: String, focus: Focus) -> Block<'static> {
+    let border = if focus == Focus::Focused {
+        FOCUSED_BORDER
+    } else {
+        UNFOCUSED_BORDER
+    };
+    if focus == Focus::Focused {
+        title.spans.insert(0, Span::raw(FOCUS_MARKER));
     }
+    Block::bordered()
+        .border_type(border)
+        .title(title)
+        .title(Line::from(note).right_aligned())
+}
+
+/// The alert when one is set and the screen is `shown_on`, else the pane's own note.
+fn note_or_alert(app: &App, shown_on: Screen, note: impl FnOnce() -> String) -> String {
+    match app.alert() {
+        Some(alert) if app.screen == shown_on => alert.to_owned(),
+        _ => note(),
+    }
+}
+
+/// Draws the screen's panes inside `body`: two side by side on a split list screen, else one.
+fn draw_panes(frame: &mut Frame, body: Rect, app: &App, clock: &impl Clock, cache: &RenderCache) {
+    if app.is_split() && app.screen == Screen::List {
+        if let Panes::Split { list, detail } =
+            layout::panes(body, app.pane, &LayoutSettings::default())
+        {
+            let (list_focus, detail_focus) = match app.pane {
+                layout::Pane::List => (Focus::Focused, Focus::Unfocused),
+                layout::Pane::Detail => (Focus::Unfocused, Focus::Focused),
+            };
+            draw_list_pane(frame, list, app, clock, list_focus);
+            draw_detail_pane(frame, detail, app, clock, cache, detail_focus);
+            return;
+        }
+    }
+    match app.screen {
+        Screen::List => draw_list_pane(frame, body, app, clock, Focus::Unmarked),
+        Screen::Detail => draw_detail_pane(frame, body, app, clock, cache, Focus::Unmarked),
+        Screen::Diff => draw_diff_pane(frame, body, app),
+    }
+}
+
+fn draw_list_pane(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, focus: Focus) {
+    let mut title = choice_line(&VIEWS, app.view);
+    if let Some(spinner) = app.spinner() {
+        title.push_span(Span::raw(format!("{HEADER_SEPARATOR}{spinner}")));
+    }
+    let note = note_or_alert(app, Screen::List, || {
+        format!("{} {ROW_COUNT_UNIT}", app.list_rows().len())
+    });
+    let block = pane_block(title, note, focus);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    draw_list(frame, inner, app, clock);
+}
+
+fn draw_detail_pane(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    clock: &impl Clock,
+    cache: &RenderCache,
+    focus: Focus,
+) {
+    let note = note_or_alert(app, Screen::Detail, || {
+        app.selected.as_ref().map_or_else(String::new, |key| {
+            format!("{}#{}", sanitize(&key.repo), key.number)
+        })
+    });
+    let block = pane_block(choice_line(&TABS, app.tab), note, focus);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if app.selected.is_some() {
+        detail::render_cached(frame, inner, app, clock, cache);
+    } else {
+        frame.render_widget(Paragraph::new(NO_SELECTION_TEXT), inner);
+    }
+}
+
+fn draw_diff_pane(frame: &mut Frame, area: Rect, app: &App) {
+    let note = note_or_alert(app, Screen::Diff, String::new);
+    let block = pane_block(Line::from(DIFF_HEADER), note, Focus::Unmarked);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    draw_diff(frame, inner, app);
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock) {

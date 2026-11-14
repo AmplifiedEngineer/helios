@@ -1,0 +1,16 @@
+┏> [Mine]  Needs me  |━━━━━━━━━━━━━━━━━━━━2 PRs┓┌[Overview]  Conversation  Commits  Files  Checks────────────org/repo#1┐
+┃REPO         #      TITLE                     ┃│First change                                                          │
+┃org/repo     #1     First change              ┃│octo Open                                                             │
+┃org/repo     #2     Second change             ┃│                                                                      │
+┃                                              ┃│The body text                                                         │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┃                                              ┃│                                                                      │
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛└──────────────────────────────────────────────────────────────────────┘
+j/k move  g/G first/last  Enter/l open  m mine/needs me  r refresh  d toggle drafts  o open in browser  ? help  q quit
+Ctrl-C quit
