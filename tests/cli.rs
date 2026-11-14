@@ -199,6 +199,7 @@ fn config_has_the_same_fields_in_every_build() {
         smoke: false,
         version: None,
         help: false,
+        print_config: false,
         gh_program: PathBuf::from("gh"),
         theme: None,
         theme_env: None,

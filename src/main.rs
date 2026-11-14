@@ -13,6 +13,7 @@ use helios::config::{self, Config as Settings};
 use helios::github::clients::{build_clients, Client, ClientsError};
 use helios::github::octo::{Octo, REQUEST_TIMEOUT};
 use helios::smoke::{self, SmokeAccount};
+use helios::tui::keys::KeyMap;
 use helios::tui::run::{Session, TerminalEvents};
 use helios::tui::{self, SystemClock};
 
@@ -60,6 +61,7 @@ fn run(config: &Config, settings: &Settings, hooks: DebugHooks) -> io::Result<()
     }
     let mut session = Session::new(terminal, app, TerminalEvents, SystemClock, loader, results);
     session.set_refresh_interval(Duration::from_secs(config.refresh_secs));
+    session.set_keys(KeyMap::new(&settings.keys));
     let outcome = session.run();
     tui::restore_terminal();
     outcome
@@ -114,13 +116,24 @@ fn main() -> ExitCode {
     if config.smoke {
         return smoke_main(&config);
     }
-    let settings = match config::load(config::config_path(&real_env).as_deref()) {
+    let mut settings = match config::load(config::config_path(&real_env).as_deref()) {
         Ok(settings) => settings,
         Err(error) => {
             eprintln!("helios: {error}");
             return ExitCode::FAILURE;
         }
     };
+    if config.print_config {
+        settings.theme.name = config::resolve_theme(
+            config.theme.as_deref(),
+            config.theme_env.as_deref(),
+            &settings.theme.name,
+        )
+        .name()
+        .to_string();
+        print!("{}", config::to_toml(&settings));
+        return ExitCode::SUCCESS;
+    }
     match run(&config, &settings, cli::debug_hooks(&env)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

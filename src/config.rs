@@ -146,6 +146,50 @@ pub struct KeysConfig {
     pub scopes: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
 
+impl KeysConfig {
+    /// The keys the file binds to `action` in `scope`, when it binds any.
+    pub fn override_of(&self, scope: &str, action: &str) -> Option<&[String]> {
+        self.scopes
+            .get(scope)
+            .and_then(|actions| actions.get(action))
+            .map(Vec::as_slice)
+    }
+
+    /// The keys that run `action` in `scope`: the file's, else the built-in ones.
+    pub fn keys_for(&self, scope: &str, action: &str) -> Vec<String> {
+        self.override_of(scope, action)
+            .map_or_else(|| names(default_keys(action)), <[String]>::to_vec)
+    }
+}
+
+/// The built-in keys for an action; every scope that has the action uses the same ones.
+pub fn default_keys(action: &str) -> &'static [&'static str] {
+    match action {
+        "move_down" | "scroll_down" => &["j", "Down"],
+        "move_up" | "scroll_up" => &["k", "Up"],
+        "first" => &["g", "Home"],
+        "last" => &["G", "End"],
+        "open" => &["Enter", "l"],
+        "toggle_view" => &["m"],
+        "refresh" => &["r"],
+        "filter" => &["f"],
+        "toggle_drafts" => &["d"],
+        "theme" => &["t"],
+        "open_in_browser" => &["o"],
+        "help" => &["?"],
+        "quit" => &["q", "Ctrl-C"],
+        "back" => &["Esc", "Backspace", "h"],
+        "next_tab" => &["Tab"],
+        "previous_tab" => &["Shift-Tab"],
+        "toggle_file" => &["Enter", "Space"],
+        "open_all" => &["e"],
+        "close_all" => &["E"],
+        "toggle_tests" => &["x"],
+        "full_diff" => &["v"],
+        _ => &[],
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeConfig {
     pub name: String,
@@ -470,6 +514,7 @@ fn scope_bindings(
 ) -> Result<BTreeMap<String, Vec<String>>, ConfigError> {
     let table = format!("keys.{scope}");
     let mut owner_of: BTreeMap<String, String> = BTreeMap::new();
+    let kept_defaults = kept_default_keys(valid_actions, &actions);
     let mut bound = BTreeMap::new();
     for (action, keys) in actions {
         if !valid_actions.contains(&action.as_str()) {
@@ -493,20 +538,42 @@ fn scope_bindings(
                     format!("key `{key}` is reserved and cannot be rebound"),
                 ));
             }
-            if let Some(other) = owner_of.insert(key.clone(), action.clone()) {
+            if let Some(other) = kept_defaults.get(key.as_str()) {
                 return Err(source.error(
                     &table,
                     &action,
                     format!(
-                        "key `{key}` is bound to both `{other}` and `{action}` in scope {scope}"
+                        "key `{key}` is already used by `{other}` in {scope}; rebind `{other}` too"
                     ),
                 ));
+            }
+            if let Some(other) = owner_of.insert(key.clone(), action.clone()) {
+                let message = if other == action {
+                    format!("key `{key}` is listed twice for `{action}` in scope {scope}")
+                } else {
+                    format!(
+                        "key `{key}` is bound to both `{other}` and `{action}` in scope {scope}"
+                    )
+                };
+                return Err(source.error(&table, &action, message));
             }
             canonical.push(key);
         }
         bound.insert(action, canonical);
     }
     Ok(bound)
+}
+
+/// The built-in keys of the actions the file leaves alone, each with its action.
+fn kept_default_keys<'a>(
+    valid_actions: &[&'a str],
+    overridden: &RawActions,
+) -> BTreeMap<&'static str, &'a str> {
+    valid_actions
+        .iter()
+        .filter(|action| !overridden.contains_key(**action))
+        .flat_map(|action| default_keys(action).iter().map(move |key| (*key, *action)))
+        .collect()
 }
 
 /// Checks a key string and returns its canonical spelling.
@@ -585,6 +652,84 @@ pub fn load(path: Option<&Path>) -> Result<Config, LoadError> {
             source,
         }),
     }
+}
+
+/// The settings as TOML that `parse` reads back, with the default keys as comments.
+pub fn to_toml(config: &Config) -> String {
+    let layout = &config.layout;
+    let mut lines = vec![
+        "[layout]".to_string(),
+        format!("list_percent = {}", layout.list_percent),
+        format!("narrow_below = {}", layout.narrow_below),
+        format!("preview_delay_ms = {}", layout.preview_delay_ms),
+        String::new(),
+        "[columns]".to_string(),
+        format!("mine = {}", toml_list(&config.columns.mine)),
+        format!("needs_me = {}", toml_list(&config.columns.needs_me)),
+        String::new(),
+        KEYS_NOTE.to_string(),
+        RESERVED_NOTE.to_string(),
+    ];
+    for (scope, actions) in SCOPE_ACTIONS {
+        lines.extend(scope_lines(&config.keys, scope, actions));
+    }
+    lines.extend([
+        String::new(),
+        "[theme]".to_string(),
+        format!("name = {}", toml_text(&config.theme.name)),
+        String::new(),
+        "[files]".to_string(),
+        format!("test_dirs = {}", toml_list(&config.files.test_dirs)),
+        format!("test_files = {}", toml_list(&config.files.test_files)),
+        format!("collapsed = {}", config.files.collapsed),
+    ]);
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+const KEYS_NOTE: &str =
+    "# A line that starts with # shows a default key. Remove the # to change it.";
+
+const RESERVED_NOTE: &str = "# The quit, help and back actions keep their reserved keys.";
+
+/// An action whose default keys include a reserved one cannot be offered as an example to edit.
+fn has_reserved_key(action: &str) -> bool {
+    default_keys(action)
+        .iter()
+        .any(|key| RESERVED_KEYS.contains(key))
+}
+
+fn scope_lines(keys: &KeysConfig, scope: &str, actions: &[&str]) -> Vec<String> {
+    let table = keys.scopes.get(scope);
+    let header = format!("[keys.{scope}]");
+    let mut lines = vec![
+        String::new(),
+        if table.is_some() {
+            header
+        } else {
+            format!("# {header}")
+        },
+    ];
+    for action in actions {
+        match keys.override_of(scope, action) {
+            Some(bound) => lines.push(format!("{action} = {}", toml_list(bound))),
+            None if has_reserved_key(action) => {}
+            None => {
+                let defaults = names(default_keys(action));
+                lines.push(format!("# {action} = {}", toml_list(&defaults)));
+            }
+        }
+    }
+    lines
+}
+
+fn toml_text(text: &str) -> String {
+    toml::Value::String(text.to_string()).to_string()
+}
+
+fn toml_list(items: &[String]) -> String {
+    let values = items.iter().cloned().map(toml::Value::String).collect();
+    toml::Value::Array(values).to_string()
 }
 
 /// The theme named by `name`, when it is one of the five.
