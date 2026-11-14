@@ -2,8 +2,8 @@
 
 //! Decides whether a changed file is a test file, from its path alone.
 
-const DEFAULT_DIRECTORIES: [&str; 4] = ["tests", "test", "__tests__", "spec"];
-const DEFAULT_FILE_PATTERNS: [&str; 5] = [
+pub const DEFAULT_DIRECTORIES: [&str; 4] = ["tests", "test", "__tests__", "spec"];
+pub const DEFAULT_FILE_PATTERNS: [&str; 5] = [
     "*.test.*",
     "*.spec.*",
     "*_test.rs",

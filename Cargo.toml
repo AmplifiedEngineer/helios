@@ -24,11 +24,11 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 syntect = { version = "=5.3.0", default-features = false, features = ["regex-fancy", "default-syntaxes"] }
 thiserror = "=2.0.21"
+toml = "=1.1.8"
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
 two-face = { version = "=0.5.2", default-features = false, features = ["syntect-fancy"] }
 
 [dev-dependencies]
-toml = "=1.1.8"
 yaml-rust2 = "=0.13.0"
 
 [lints.rust]
