@@ -4,10 +4,12 @@
 
 use ratatui::layout::Rect;
 
+use crate::config::{LayoutConfig, DEFAULT_LIST_PERCENT, DEFAULT_NARROW_BELOW};
+
 /// Share of the width the list pane takes, in percent.
-pub const LIST_PERCENT: u16 = 40;
+pub const LIST_PERCENT: u16 = DEFAULT_LIST_PERCENT;
 /// Areas narrower than this many columns show one pane.
-pub const NARROW_BELOW: u16 = 100;
+pub const NARROW_BELOW: u16 = DEFAULT_NARROW_BELOW;
 /// Narrowest a pane gets when the area is wide enough for two.
 pub const MIN_PANE_WIDTH: u16 = 30;
 /// Narrowest terminal the interface draws in.
@@ -29,6 +31,15 @@ impl Default for LayoutSettings {
         Self {
             list_percent: LIST_PERCENT,
             narrow_below: NARROW_BELOW,
+        }
+    }
+}
+
+impl From<&LayoutConfig> for LayoutSettings {
+    fn from(config: &LayoutConfig) -> Self {
+        Self {
+            list_percent: config.list_percent,
+            narrow_below: config.narrow_below,
         }
     }
 }

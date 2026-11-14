@@ -16,7 +16,7 @@ use crate::sanitize::sanitize;
 use crate::tui::cache::{HighlightBudget, RenderCache};
 use crate::tui::diff::Highlighting;
 use crate::tui::keys::{self, Scope};
-use crate::tui::layout::{self, LayoutSettings, Panes, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
+use crate::tui::layout::{self, Panes, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 use crate::tui::style::Styles;
 use crate::tui::{detail, diff, list};
 
@@ -169,9 +169,7 @@ fn draw_panes(
     budget: &HighlightBudget,
 ) {
     if app.is_split() && app.screen == Screen::List {
-        if let Panes::Split { list, detail } =
-            layout::panes(body, app.pane, &LayoutSettings::default())
-        {
+        if let Panes::Split { list, detail } = layout::panes(body, app.pane, &app.layout()) {
             let (list_focus, detail_focus) = match app.pane {
                 layout::Pane::List => (Focus::Focused, Focus::Unfocused),
                 layout::Pane::Detail => (Focus::Unfocused, Focus::Focused),

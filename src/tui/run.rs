@@ -21,7 +21,6 @@ use crate::github::GithubApi;
 use crate::tui::cache::RenderCache;
 use crate::tui::draw::draw_cached;
 use crate::tui::keys::{handle_key, Outcome};
-use crate::tui::layout::{is_split, LayoutSettings};
 
 /// How long one step waits for a key before it looks at the background results again.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -186,8 +185,7 @@ where
     fn sync_split(&mut self, width: Option<u16>) {
         let width = width.or_else(|| self.terminal.size().ok().map(|size| size.width));
         if let Some(width) = width {
-            self.app
-                .set_split(is_split(width, &LayoutSettings::default()));
+            self.app.sync_split(width);
         }
     }
 

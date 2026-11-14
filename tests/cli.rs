@@ -200,6 +200,8 @@ fn config_has_the_same_fields_in_every_build() {
         version: None,
         help: false,
         gh_program: PathBuf::from("gh"),
+        theme: None,
+        theme_env: None,
     };
 
     // Act
@@ -251,9 +253,10 @@ fn version_carries_the_crate_version() {
 
 const HELP_FLAG: &str = "--help";
 const SMOKE_FLAG: &str = "--smoke";
-const KNOWN_FLAGS: [&str; 6] = [
+const KNOWN_FLAGS: [&str; 7] = [
     "--hosts",
     "--refresh-secs",
+    "--theme",
     "--drafts",
     "--smoke",
     "--version",
@@ -489,4 +492,23 @@ fn main_leaves_client_building_to_the_library() {
     // Assert
     assert!(!text.contains("api_base"));
     assert!(!text.contains("GhTokens"));
+}
+
+#[test]
+fn theme_flag_and_env_are_checked_against_the_five_names() {
+    // Arrange
+    let from_env = env(&[("HELIOS_THEME", "light")]);
+
+    // Act
+    let flag = cli::parse(&args(&["--theme", "dark"]), &env(&[]));
+    let variable = cli::parse(&args(&[]), &from_env);
+    let unknown = cli::parse(&args(&["--theme", "neon"]), &env(&[]));
+
+    // Assert
+    assert_eq!(flag.expect("flag parses").theme.as_deref(), Some("dark"));
+    assert_eq!(
+        variable.expect("env parses").theme_env.as_deref(),
+        Some("light")
+    );
+    assert!(unknown.is_err(), "an unknown theme is a CliError");
 }

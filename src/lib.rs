@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod app;
 pub mod browser;
 pub mod cli;
+pub mod config;
 pub mod github;
 pub mod highlight;
 pub mod markdown;

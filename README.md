@@ -25,12 +25,13 @@ helios [options]
 |------|---------|
 | `--hosts <hosts>` | Comma-separated hosts to include. `--smoke` honours it. Env: `HELIOS_HOSTS`. |
 | `--refresh-secs <secs>` | Refresh interval, 30 to 3600 seconds. The value is checked; nothing uses it yet. Env: `HELIOS_REFRESH_SECS`. |
+| `--theme <name>` | Start theme: `default`, `spectrum`, `dark`, `light` or `mono`. Beats the `[theme]` section of the config file. Env: `HELIOS_THEME`. |
 | `--drafts` | Count draft pull requests. `--smoke` honours it. |
 | `--smoke` | Query every account once, print the Mine and Needs me counts, and exit. It does not start the UI. Exit code 1 when there are no accounts or no host answers. |
 | `--version`, `-V` | Print the version and exit. |
 | `--help` | Print the usage and exit. |
 
-A flag beats its environment variable. `HELIOS_GH` names the `gh` program to run; the default is `gh`.
+A flag beats its environment variable, and the environment beats the config file. `HELIOS_CONFIG` names the config file; the default is `$XDG_CONFIG_HOME/helios/config.toml`, else `~/.config/helios/config.toml`. A missing file means the defaults. A bad file stops startup with a message that names the file, the line and the key. Helios only reads the file. `--help`, `--version` and `--smoke` do not read it. `HELIOS_GH` names the `gh` program to run; the default is `gh`.
 
 ### Keys
 

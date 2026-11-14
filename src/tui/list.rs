@@ -63,6 +63,23 @@ const DROP_ORDER: [Column; 6] = [
 ];
 
 impl Column {
+    /// The column a settings name stands for.
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "host" => Some(Self::Host),
+            "repo" => Some(Self::Repo),
+            "number" => Some(Self::Number),
+            "title" => Some(Self::Title),
+            "author" => Some(Self::Author),
+            "tag" => Some(Self::Tag),
+            "draft" => Some(Self::Draft),
+            "review" => Some(Self::Review),
+            "checks" => Some(Self::Checks),
+            "updated" => Some(Self::Updated),
+            _ => None,
+        }
+    }
+
     fn header(self) -> &'static str {
         match self {
             Self::Host => "HOST",
@@ -171,6 +188,23 @@ fn visible_columns(
     columns
 }
 
+/// The listed columns in the listed order; when they do not fit, the rightmost go first,
+/// but the title and the number stay.
+fn listed_columns(names: &[String], width: u16) -> Vec<Column> {
+    let mut columns: Vec<Column> = names
+        .iter()
+        .filter_map(|name| Column::from_name(name))
+        .collect();
+    while needed_width(&columns) > width {
+        let droppable = columns
+            .iter()
+            .rposition(|column| !matches!(column, Column::Title | Column::Number));
+        let Some(position) = droppable else { break };
+        columns.remove(position);
+    }
+    columns
+}
+
 /// How many columns the table is short of `width`, with every column at its full width.
 fn shortfall(columns: &[Column], width: u16) -> u16 {
     needed_width(columns).saturating_sub(width)
@@ -216,7 +250,12 @@ pub fn render_rows(
     let now = clock.now();
     let first_host = rows.first().map(|row| &row.key.host);
     let several_hosts = rows.iter().any(|row| Some(&row.key.host) != first_host);
-    let columns = visible_columns(area.width, several_hosts, &rows, now);
+    let names = app.column_names();
+    let columns = if names.is_empty() {
+        visible_columns(area.width, several_hosts, &rows, now)
+    } else {
+        listed_columns(names, area.width)
+    };
     let repo_width = repo_width(&columns, area.width);
     let styles = Styles::of(app);
     let rows = rows

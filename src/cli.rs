@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::app::refresh::REFRESH_INTERVAL;
+use crate::config::theme_named;
 
 pub const REFRESH_SECS_MIN: u64 = 30;
 pub const REFRESH_SECS_MAX: u64 = 3600;
@@ -15,6 +16,8 @@ pub const REFRESH_SECS_MAX: u64 = 3600;
 const FLAG_PREFIX: &str = "--";
 const HOSTS_FLAG: &str = "--hosts";
 const REFRESH_FLAG: &str = "--refresh-secs";
+const THEME_FLAG: &str = "--theme";
+const THEME_ENV: &str = "HELIOS_THEME";
 const DRAFTS_FLAG: &str = "--drafts";
 const SMOKE_FLAG: &str = "--smoke";
 const VERSION_FLAG: &str = "--version";
@@ -39,6 +42,10 @@ pub struct Config {
     pub version: Option<&'static str>,
     pub help: bool,
     pub gh_program: PathBuf,
+    /// The theme name from `--theme`, already checked.
+    pub theme: Option<String>,
+    /// The theme name from `HELIOS_THEME`, already checked.
+    pub theme_env: Option<String>,
 }
 
 /// Test switches read from the environment. Every field is false in a release build.
@@ -65,6 +72,8 @@ pub enum CliError {
     RefreshSecsNotNumber { name: &'static str },
     #[error("{0} needs a value")]
     MissingValue(&'static str),
+    #[error("{name} names an unknown theme `{value}`")]
+    UnknownTheme { name: &'static str, value: String },
     #[error("unknown argument {0}")]
     UnknownArgument(String),
 }
@@ -84,7 +93,10 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
         gh_program: env
             .get(GH_ENV)
             .map_or_else(|| PathBuf::from(DEFAULT_GH_PROGRAM), PathBuf::from),
+        theme: None,
+        theme_env: None,
     };
+    let mut theme = None;
 
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -96,6 +108,10 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
             REFRESH_FLAG => {
                 let raw = flag_value(&mut rest, REFRESH_FLAG)?;
                 refresh = Some(parse_refresh(raw, REFRESH_FLAG)?);
+            }
+            THEME_FLAG => {
+                let raw = flag_value(&mut rest, THEME_FLAG)?;
+                theme = Some(checked_theme(raw, THEME_FLAG)?);
             }
             DRAFTS_FLAG => config.drafts = true,
             SMOKE_FLAG => config.smoke = true,
@@ -114,6 +130,13 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
             .transpose()?;
     }
     config.refresh_secs = refresh.unwrap_or(config.refresh_secs);
+    if !informational {
+        config.theme_env = env
+            .get(THEME_ENV)
+            .map(|raw| checked_theme(raw, THEME_ENV))
+            .transpose()?;
+    }
+    config.theme = theme;
     Ok(config)
 }
 
@@ -142,6 +165,7 @@ pub fn help() -> String {
          Options:\n\
          \x20 {HOSTS_FLAG} <hosts>        Comma-separated hosts to show (env {HOSTS_ENV})\n\
          \x20 {REFRESH_FLAG} <secs>  Refresh interval, {REFRESH_SECS_MIN} to {REFRESH_SECS_MAX} (env {REFRESH_ENV})\n\
+         \x20 {THEME_FLAG} <name>        Start theme: default, spectrum, dark, light or mono (env {THEME_ENV})\n\
          \x20 {DRAFTS_FLAG}               Show draft pull requests\n\
          \x20 {SMOKE_FLAG}                Print the Mine and Needs me counts and exit\n\
          \x20 {VERSION_FLAG}              Print the version and exit\n\
@@ -158,6 +182,15 @@ fn split_hosts(raw: &str) -> Vec<String> {
         .filter(|host| !host.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+fn checked_theme(raw: &str, name: &'static str) -> Result<String, CliError> {
+    theme_named(raw)
+        .map(|theme| theme.name().to_string())
+        .ok_or_else(|| CliError::UnknownTheme {
+            name,
+            value: raw.to_string(),
+        })
 }
 
 fn parse_refresh(raw: &str, name: &'static str) -> Result<u64, CliError> {
