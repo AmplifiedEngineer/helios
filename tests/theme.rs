@@ -3,6 +3,8 @@
 //! The five themes: names, order, pinned values, depth detection and NO_COLOR.
 
 use helios::theme::{effective_theme, no_color, ColorDepth, Ink, NamedColor, Palette, Role, Theme};
+use helios::tui::style::ink_to_color;
+use ratatui::style::Color;
 
 const fn rgb(hex: u32) -> Ink {
     Ink::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -231,6 +233,45 @@ fn every_role_has_a_color_in_all_five_themes() {
             } else {
                 assert_ne!(ink, Ink::Reset, "{} {role:?}", theme.name());
             }
+        }
+    }
+}
+
+#[test]
+fn light_caution_and_warn_are_not_the_error_color_at_16_colors() {
+    // Arrange
+    let true_color = Palette::of(Theme::Light, ColorDepth::TrueColor);
+    let reduced = Palette::of(Theme::Light, ColorDepth::Ansi16);
+
+    // Act
+    let caution = ink_to_color(reduced.caution, ColorDepth::Ansi16);
+    let warn = ink_to_color(reduced.warn, ColorDepth::Ansi16);
+    let error = ink_to_color(reduced.error, ColorDepth::Ansi16);
+
+    // Assert
+    assert_ne!(caution, error, "caution against error");
+    assert_ne!(warn, error, "warn against error");
+    assert_eq!(caution, Color::Yellow);
+    assert_eq!(warn, Color::Yellow);
+    assert_eq!(true_color.caution, rgb(0xa06400));
+    assert_eq!(true_color.warn, rgb(0xa06400));
+}
+
+#[test]
+fn keywords_and_comments_differ_at_16_colors() {
+    // Arrange
+    let depths = [ColorDepth::Ansi16, ColorDepth::Ansi256];
+
+    for theme in Theme::ALL.into_iter().filter(|t| *t != Theme::Mono) {
+        for depth in depths {
+            let palette = Palette::of(theme, depth);
+
+            // Act
+            let keyword = ink_to_color(palette.role(Role::Keyword), depth);
+            let comment = ink_to_color(palette.role(Role::Comment), depth);
+
+            // Assert
+            assert_ne!(keyword, comment, "{} at {depth:?}", theme.name());
         }
     }
 }

@@ -279,3 +279,47 @@ fn a_16_color_terminal_gets_named_colors() {
         "the f of fail on the second row"
     );
 }
+
+#[test]
+fn an_rgb_theme_is_reduced_on_a_16_color_terminal() {
+    // Arrange
+    // Standard's selection is ffffff on 1f4e79 and its error is d55e00. The
+    // nearest ANSI colors are White, DarkGray (distance 11653, under Blue's
+    // 20734) and Red (8900, under LightRed's 10600). In the xterm cube they
+    // are index 231, 24 and 166.
+    let cases = [
+        (
+            ColorDepth::Ansi16,
+            (Color::White, Color::DarkGray),
+            (Color::Red, Color::Reset),
+        ),
+        (
+            ColorDepth::Ansi256,
+            (Color::Indexed(231), Color::Indexed(24)),
+            (Color::Indexed(166), Color::Reset),
+        ),
+    ];
+
+    for (depth, selected, failing) in cases {
+        let mut app = listed();
+        app.set_theme(Theme::Standard);
+        app.set_depth(depth);
+
+        // Act
+        let buffer = draw(&app, &RenderCache::new());
+
+        // Assert
+        let selected_title = column_of(&buffer, SELECTED_ROW_Y, "First");
+        assert_eq!(
+            cell_colors(&buffer, selected_title, SELECTED_ROW_Y),
+            selected,
+            "{depth:?}: the F of First change on the selected row"
+        );
+        let failing_check = column_of(&buffer, FAILING_ROW_Y, "fail");
+        assert_eq!(
+            cell_colors(&buffer, failing_check, FAILING_ROW_Y),
+            failing,
+            "{depth:?}: the f of fail on the second row"
+        );
+    }
+}

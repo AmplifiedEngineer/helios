@@ -165,18 +165,40 @@ const VERMILLION: Ink = hex(0xd55e00);
 const PURPLE: Ink = hex(0xcc79a7);
 const INACTIVE_GRAY: Ink = hex(0x767676);
 const FOREGROUND_GRAY: Ink = hex(0xcccccc);
+const MAGENTA: Ink = named(NamedColor::Magenta);
 // pbtop's light theme amber for caution and warn.
 const AMBER: Ink = hex(0xa06400);
 
 impl Palette {
     pub fn of(theme: Theme, depth: ColorDepth) -> Palette {
-        match theme {
+        let palette = match theme {
             Theme::Standard => standard(depth),
             Theme::Spectrum => spectrum(depth),
             Theme::Dark => dark(depth),
             Theme::Light => light(depth),
             Theme::Mono => mono(depth),
+        };
+        match (theme, depth) {
+            (Theme::Standard | Theme::Spectrum, ColorDepth::Ansi16) => {
+                palette.with_keyword(MAGENTA)
+            }
+            (Theme::Light, ColorDepth::Ansi16) => palette.with_amber(named(NamedColor::Yellow)),
+            _ => palette,
         }
+    }
+
+    // Purple reduces to the gray of comments, so 16 colors name magenta.
+    fn with_keyword(mut self, ink: Ink) -> Palette {
+        self.code[Role::Keyword as usize] = ink;
+        self
+    }
+
+    // Amber reduces to the error red, so 16 colors name yellow.
+    fn with_amber(mut self, ink: Ink) -> Palette {
+        self.caution = ink;
+        self.warn = ink;
+        self.code[Role::Number as usize] = ink;
+        self
     }
 
     pub fn role(&self, role: Role) -> Ink {
