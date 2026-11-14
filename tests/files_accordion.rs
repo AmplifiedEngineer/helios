@@ -200,6 +200,47 @@ fn closing_the_group_with_the_cursor_inside_moves_it_to_the_group_row() {
     );
 }
 
+const TWO_TEST_FILES: [&str; 4] = ["src/a.rs", "src/b.rs", "tests/c.rs", "tests/d.rs"];
+
+#[test]
+fn closing_the_tests_group_moves_the_cursor_to_the_group_row() {
+    // Arrange
+    let mut app = app_with(&TWO_TEST_FILES);
+    press(&mut app, KeyCode::Char('x'));
+    press(&mut app, KeyCode::Char('G'));
+    let on_second_test_file = app.file_cursor();
+
+    // Act
+    press(&mut app, KeyCode::Char('x'));
+
+    // Assert
+    assert_eq!(on_second_test_file, 4);
+    assert_eq!(
+        app.file_rows().get(app.file_cursor()),
+        Some(&FileRow::Tests(2))
+    );
+    assert!(app.selected_file().is_none());
+}
+
+#[test]
+fn shift_e_closes_the_group_and_keeps_the_cursor_on_a_valid_row() {
+    // Arrange
+    let mut app = app_with(&TWO_TEST_FILES);
+    press(&mut app, KeyCode::Char('e'));
+    press(&mut app, KeyCode::Char('G'));
+
+    // Act
+    press(&mut app, KeyCode::Char('E'));
+
+    // Assert
+    assert!(!app.tests_open());
+    assert!(app.file_cursor() < app.file_rows().len());
+    assert_eq!(
+        app.file_rows().get(app.file_cursor()),
+        Some(&FileRow::Tests(2))
+    );
+}
+
 #[test]
 fn enter_on_the_tests_row_toggles_the_group() {
     // Arrange
