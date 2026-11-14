@@ -5,7 +5,7 @@
 use std::time::SystemTime;
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
@@ -16,6 +16,7 @@ use crate::sanitize::sanitize;
 use crate::tui::cache::RenderCache;
 use crate::tui::keys::{self, Scope};
 use crate::tui::layout::{self, LayoutSettings, Panes, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
+use crate::tui::style::Styles;
 use crate::tui::{detail, diff, list};
 
 const HEADER_SEPARATOR: &str = "  ";
@@ -82,17 +83,18 @@ pub fn draw_with(frame: &mut Frame, app: &App, clock: &impl Clock) {
 }
 
 /// The names in `names` on one line, the current one in brackets and bold.
-fn choice_line<T: PartialEq + Copy, S: AsRef<str>>(names: &[(T, S)], current: T) -> Line<'static> {
+fn choice_line<T: PartialEq + Copy, S: AsRef<str>>(
+    names: &[(T, S)],
+    current: T,
+    current_style: Style,
+) -> Line<'static> {
     let mut spans = Vec::new();
     for (value, name) in names {
         if !spans.is_empty() {
             spans.push(Span::raw(HEADER_SEPARATOR));
         }
         if *value == current {
-            spans.push(Span::styled(
-                format!("[{}]", name.as_ref()),
-                Style::new().add_modifier(Modifier::BOLD),
-            ));
+            spans.push(Span::styled(format!("[{}]", name.as_ref()), current_style));
         } else {
             spans.push(Span::raw(name.as_ref().to_owned()));
         }
@@ -123,17 +125,24 @@ enum Focus {
 }
 
 /// A bordered pane with `title` on the left and `note` on the right.
-fn pane_block(mut title: Line<'static>, note: String, focus: Focus) -> Block<'static> {
-    let border = if focus == Focus::Focused {
-        FOCUSED_BORDER
+fn pane_block(
+    mut title: Line<'static>,
+    note: String,
+    focus: Focus,
+    styles: &Styles,
+) -> Block<'static> {
+    let (border, border_style) = if focus == Focus::Focused {
+        (FOCUSED_BORDER, styles.border_focused)
     } else {
-        UNFOCUSED_BORDER
+        (UNFOCUSED_BORDER, styles.border)
     };
     if focus == Focus::Focused {
         title.spans.insert(0, Span::raw(FOCUS_MARKER));
     }
     Block::bordered()
         .border_type(border)
+        .border_style(border_style)
+        .title_style(styles.title)
         .title(title)
         .title(Line::from(note).right_aligned())
 }
@@ -169,14 +178,15 @@ fn draw_panes(frame: &mut Frame, body: Rect, app: &App, clock: &impl Clock, cach
 }
 
 fn draw_list_pane(frame: &mut Frame, area: Rect, app: &App, clock: &impl Clock, focus: Focus) {
-    let mut title = choice_line(&VIEWS, app.view);
+    let styles = Styles::of(app);
+    let mut title = choice_line(&VIEWS, app.view, styles.tab_current);
     if let Some(spinner) = app.spinner() {
         title.push_span(Span::raw(format!("{HEADER_SEPARATOR}{spinner}")));
     }
     let note = note_or_alert(app, Screen::List, || {
         format!("{} {ROW_COUNT_UNIT}", app.list_rows().len())
     });
-    let block = pane_block(title, note, focus);
+    let block = pane_block(title, note, focus, &styles);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     draw_list(frame, inner, app, clock);
@@ -195,7 +205,9 @@ fn draw_detail_pane(
             format!("{}#{}", sanitize(&key.repo), key.number)
         })
     });
-    let block = pane_block(choice_line(&tab_labels(app), app.tab), note, focus);
+    let styles = Styles::of(app);
+    let tabs = choice_line(&tab_labels(app), app.tab, styles.tab_current);
+    let block = pane_block(tabs, note, focus, &styles);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if app.selected.is_some() {
@@ -207,7 +219,12 @@ fn draw_detail_pane(
 
 fn draw_diff_pane(frame: &mut Frame, area: Rect, app: &App) {
     let note = note_or_alert(app, Screen::Diff, String::new);
-    let block = pane_block(Line::from(DIFF_HEADER), note, Focus::Unmarked);
+    let block = pane_block(
+        Line::from(DIFF_HEADER),
+        note,
+        Focus::Unmarked,
+        &Styles::of(app),
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
     draw_diff(frame, inner, app);

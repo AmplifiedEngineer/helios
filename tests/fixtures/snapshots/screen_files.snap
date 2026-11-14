@@ -10,7 +10,7 @@
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
-│                                                                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 j/k move  g/G first/last  Enter/Space toggle file  e/E open/close all  x tests group  v full diff
-Esc/h back  Tab next tab  Shift-Tab previous tab  o open in browser  ? help  q quit  Ctrl-C quit
+Esc/h back  Tab next tab  Shift-Tab previous tab  t theme  o open in browser  ? help  q quit
+Ctrl-C quit

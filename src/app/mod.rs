@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime};
 use crate::github::errors::GithubError;
 use crate::model::{ChangedFile, PrDetail, PrKey, PrSummary, Tag};
 use crate::test_files::TestPatterns;
+use crate::theme::{ColorDepth, Theme};
 use worker::Loaded;
 
 pub mod loader;
@@ -123,6 +124,8 @@ pub struct App {
     pub tab: DetailTab,
     /// Whether the help overlay is open.
     pub show_help: bool,
+    theme: Theme,
+    depth: ColorDepth,
     pub view: ListView,
     detail: DetailState,
     files: Option<Vec<ChangedFile>>,
@@ -217,6 +220,27 @@ impl App {
             ListFilter::Review => ListFilter::Assigned,
             ListFilter::Assigned => ListFilter::All,
         };
+    }
+
+    pub fn theme(&self) -> Theme {
+        self.theme
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
+    /// Moves to the next theme, and back to the first after the last.
+    pub fn cycle_theme(&mut self) {
+        self.theme = self.theme.next();
+    }
+
+    pub fn depth(&self) -> ColorDepth {
+        self.depth
+    }
+
+    pub fn set_depth(&mut self, depth: ColorDepth) {
+        self.depth = depth;
     }
 
     /// Shows or hides draft pull requests.

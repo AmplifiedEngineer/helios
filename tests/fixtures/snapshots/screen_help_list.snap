@@ -1,16 +1,16 @@
-┌[Mine]  Needs me  |──────────────────────────────────────────────────────────────────────────2 PRs┐
-│REPO                     #   ┌Keys──────────────────────────────────┐        AUTHOR       UPDATED │
-│org/repo                 #1  │j/k move                              │        octo         2h      │
-│org/repo                 #2  │g/G first/last                        │        octo         2h      │
-│                             │Enter/l open                          │                             │
+┌[Mine]  Needs me  |──────────┌Keys──────────────────────────────────┐────────────────────────2 PRs┐
+│REPO                     #   │j/k move                              │        AUTHOR       UPDATED │
+│org/repo                 #1  │g/G first/last                        │        octo         2h      │
+│org/repo                 #2  │Enter/l open                          │        octo         2h      │
 │                             │m mine/needs me                       │                             │
 │                             │r refresh                             │                             │
 │                             │d toggle drafts                       │                             │
+│                             │t theme                               │                             │
 │                             │o open in browser                     │                             │
 │                             │? help                                │                             │
 │                             │q quit                                │                             │
 │                             │Ctrl-C quit                           │                             │
 │                             └──────────────────────────────────────┘                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-j/k move  g/G first/last  Enter/l open  m mine/needs me  r refresh  d toggle drafts
+j/k move  g/G first/last  Enter/l open  m mine/needs me  r refresh  d toggle drafts  t theme
 o open in browser  ? help  q quit  Ctrl-C quit

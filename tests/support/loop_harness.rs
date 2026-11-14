@@ -27,7 +27,7 @@ use helios::sanitize::sanitize;
 use helios::tui::run::{EventSource, Flow, Session};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::style::Modifier;
+use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 
 use super::files::patch_file;
@@ -373,14 +373,17 @@ impl Harness {
         buffer_text(self.buffer())
     }
 
-    /// The text of the row drawn in reverse video, which is the cursor.
+    /// The text of the row drawn in reverse video or on a background color, which is the cursor.
     pub fn cursor_line(&self) -> String {
         let buffer = self.buffer();
         let width = usize::from(buffer.area.width);
         buffer
             .content()
             .chunks(width)
-            .find(|row| row[PANE_TEXT_COLUMN].modifier.contains(Modifier::REVERSED))
+            .find(|row| {
+                let cell = &row[PANE_TEXT_COLUMN];
+                cell.modifier.contains(Modifier::REVERSED) || cell.bg != Color::Reset
+            })
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .unwrap_or_default()
     }
