@@ -23,6 +23,7 @@ const SMOKE_FLAG: &str = "--smoke";
 const VERSION_FLAG: &str = "--version";
 const VERSION_SHORT_FLAG: &str = "-V";
 const HELP_FLAG: &str = "--help";
+const PRINT_CONFIG_FLAG: &str = "--print-config";
 const HOSTS_ENV: &str = "HELIOS_HOSTS";
 const REFRESH_ENV: &str = "HELIOS_REFRESH_SECS";
 const GH_ENV: &str = "HELIOS_GH";
@@ -41,6 +42,8 @@ pub struct Config {
     /// Set to the crate version when `--version` was given.
     pub version: Option<&'static str>,
     pub help: bool,
+    /// Print the effective settings as TOML and exit.
+    pub print_config: bool,
     pub gh_program: PathBuf,
     /// The theme name from `--theme`, already checked.
     pub theme: Option<String>,
@@ -90,6 +93,7 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
         smoke: false,
         version: None,
         help: false,
+        print_config: false,
         gh_program: env
             .get(GH_ENV)
             .map_or_else(|| PathBuf::from(DEFAULT_GH_PROGRAM), PathBuf::from),
@@ -117,6 +121,7 @@ pub fn parse(args: &[String], env: &HashMap<String, String>) -> Result<Config, C
             SMOKE_FLAG => config.smoke = true,
             VERSION_FLAG | VERSION_SHORT_FLAG => config.version = Some(env!("CARGO_PKG_VERSION")),
             HELP_FLAG => config.help = true,
+            PRINT_CONFIG_FLAG => config.print_config = true,
             other => return Err(CliError::UnknownArgument(other.to_string())),
         }
     }
@@ -168,6 +173,7 @@ pub fn help() -> String {
          \x20 {THEME_FLAG} <name>        Start theme: default, spectrum, dark, light or mono (env {THEME_ENV})\n\
          \x20 {DRAFTS_FLAG}               Show draft pull requests\n\
          \x20 {SMOKE_FLAG}                Print the Mine and Needs me counts and exit\n\
+         \x20 {PRINT_CONFIG_FLAG}         Print the effective settings as TOML and exit\n\
          \x20 {VERSION_FLAG}              Print the version and exit\n\
          \x20 {HELP_FLAG}                 Print this help and exit\n\
          \n\

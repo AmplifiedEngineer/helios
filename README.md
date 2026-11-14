@@ -28,14 +28,15 @@ helios [options]
 | `--theme <name>` | Start theme: `default`, `spectrum`, `dark`, `light` or `mono`. Beats the `[theme]` section of the config file. Env: `HELIOS_THEME`. |
 | `--drafts` | Count draft pull requests. `--smoke` honours it. |
 | `--smoke` | Query every account once, print the Mine and Needs me counts, and exit. It does not start the UI. Exit code 1 when there are no accounts or no host answers. |
+| `--print-config` | Print the effective settings as TOML and exit. It reads the config file and applies `--theme` and `HELIOS_THEME`. It starts no UI and makes no network call. |
 | `--version`, `-V` | Print the version and exit. |
 | `--help` | Print the usage and exit. |
 
-A flag beats its environment variable, and the environment beats the config file. `HELIOS_CONFIG` names the config file; the default is `$XDG_CONFIG_HOME/helios/config.toml`, else `~/.config/helios/config.toml`. A missing file means the defaults. A bad file stops startup with a message that names the file, the line and the key. Helios only reads the file. `--help`, `--version` and `--smoke` do not read it. `HELIOS_GH` names the `gh` program to run; the default is `gh`.
+A flag beats its environment variable, and the environment beats the config file. `HELIOS_CONFIG` names the config file. `HELIOS_GH` names the `gh` program to run. The default is `gh`. See Config file for the file.
 
 ### Keys
 
-The footer shows the keys that work on the screen you are on. `?` opens the same list.
+The footer shows the keys that work on the screen you are on. `?` opens the same list. The footer and the list show your own keys when you rebind them. See Config file.
 
 | Key | Action |
 |-----|--------|
@@ -58,6 +59,69 @@ The footer shows the keys that work on the screen you are on. `?` opens the same
 | `?` | help |
 | `q` | quit |
 | `Ctrl-C` | quit |
+
+`q`, `Ctrl-C`, `?` and `Esc` keep their meaning. You cannot rebind them.
+
+### Themes
+
+helios ships five themes: `default`, `spectrum`, `dark`, `light` and `mono`. `mono` draws no color. Press `t` to switch to the next theme while helios runs. Pick the start theme with `--theme`, with `HELIOS_THEME` or with `name` in the `[theme]` section of the config file. The flag beats the environment, and the environment beats the file. When `NO_COLOR` is set, helios draws with `mono` whatever theme you pick.
+
+## Config file
+
+The config file is optional. helios reads it at startup and never writes it. A change takes effect the next time you start helios.
+
+The file lives in one of these places. The first one that applies wins.
+
+1. The path in `HELIOS_CONFIG`.
+2. `$XDG_CONFIG_HOME/helios/config.toml`.
+3. `~/.config/helios/config.toml`.
+
+A missing file means the defaults. A bad file stops startup with a message that names the file, the line and the key. `--help`, `--version` and `--smoke` do not read the file. `--print-config` reads it.
+
+Every setting is optional. The file has five sections. Here is one example of each.
+
+```toml
+[layout]
+list_percent = 40
+narrow_below = 100
+preview_delay_ms = 300
+
+[columns]
+mine = ["repo", "number", "title", "checks", "updated"]
+needs_me = ["author", "title", "review", "updated"]
+
+[keys.files]
+toggle_tests = ["z"]
+
+[theme]
+name = "dark"
+
+[files]
+test_dirs = ["tests", "e2e"]
+test_files = ["*_test.go", "*.spec.ts"]
+collapsed = true
+```
+
+- `[layout]` sets the width of the list pane as a percent (20 to 70), the width below which helios shows one pane at a time (40 to 400), and the wait before the preview loads in milliseconds (0 to 5000).
+- `[columns]` sets which columns each list shows and in what order. The names are `host`, `repo`, `number`, `title`, `author`, `tag`, `draft`, `review`, `checks` and `updated`.
+- `[keys]` rebinds keys. See Rebinding keys.
+- `[theme]` sets the start theme.
+- `[files]` sets which paths count as tests, and whether the Files tab starts with every file collapsed.
+
+### Rebinding keys
+
+Each scope has its own table: `[keys.list]`, `[keys.detail]`, `[keys.files]` and `[keys.diff]`. Each entry names an action and lists its keys. A key is one character, `Ctrl-` and one character, or one of `Enter`, `Space`, `Tab`, `Shift-Tab`, `Up`, `Down`, `Esc`, `Backspace`, `Home` and `End`.
+
+An entry replaces the default keys of that action in that scope. Other actions and other scopes keep their keys. One key cannot run two actions in the same scope.
+
+| Scope | Actions |
+|-------|---------|
+| `list` | `move_down`, `move_up`, `first`, `last`, `open`, `toggle_view`, `refresh`, `filter`, `toggle_drafts`, `theme`, `open_in_browser`, `help`, `quit` |
+| `detail` | `scroll_down`, `scroll_up`, `first`, `last`, `back`, `next_tab`, `previous_tab`, `theme`, `open_in_browser`, `help`, `quit` |
+| `files` | `move_down`, `move_up`, `first`, `last`, `toggle_file`, `open_all`, `close_all`, `toggle_tests`, `full_diff`, `back`, `next_tab`, `previous_tab`, `theme`, `open_in_browser`, `help`, `quit` |
+| `diff` | `scroll_down`, `scroll_up`, `first`, `last`, `back`, `theme`, `open_in_browser`, `help`, `quit` |
+
+Run `helios --print-config` to see every action with its keys. Lines that start with `#` show the defaults.
 
 ## Release
 

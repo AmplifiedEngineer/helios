@@ -19,8 +19,8 @@ use crate::browser;
 use crate::github::errors::GithubError;
 use crate::github::GithubApi;
 use crate::tui::cache::RenderCache;
-use crate::tui::draw::draw_cached;
-use crate::tui::keys::{handle_key, Outcome};
+use crate::tui::draw::draw_cached_with;
+use crate::tui::keys::{handle_key_with, KeyMap, Outcome};
 
 /// How long one step waits for a key before it looks at the background results again.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -77,6 +77,7 @@ fn system_opener() -> Opener {
 pub struct Session<B: Backend, E, C: Clock, A> {
     terminal: Terminal<B>,
     app: App,
+    keys: KeyMap,
     events: E,
     clock: C,
     cache: RenderCache,
@@ -110,6 +111,7 @@ where
         let mut session = Self {
             terminal,
             app,
+            keys: KeyMap::default(),
             events,
             clock,
             cache: RenderCache::new(),
@@ -127,6 +129,12 @@ where
     /// Sets how long the list waits between automatic refreshes.
     pub fn set_refresh_interval(&mut self, interval: Duration) {
         self.scheduler = Scheduler::with_interval(self.clock.clone(), interval);
+    }
+
+    /// Sets the keys the loop reads and the footer and help show.
+    pub fn set_keys(&mut self, keys: KeyMap) {
+        self.keys = keys;
+        self.dirty = true;
     }
 
     /// Replaces the browser opener, for a test.
@@ -203,7 +211,7 @@ where
             return Flow::Running;
         }
         self.app.clear_alert();
-        let outcome = handle_key(&mut self.app, key);
+        let outcome = handle_key_with(&mut self.app, key, &self.keys);
         self.app.schedule_preview(self.clock.now());
         match outcome {
             Outcome::Continue => Flow::Running,
@@ -276,9 +284,9 @@ where
     }
 
     fn draw(&mut self) -> io::Result<()> {
-        let (app, clock, cache) = (&self.app, &self.clock, &self.cache);
+        let (app, clock, cache, keys) = (&self.app, &self.clock, &self.cache, &self.keys);
         self.terminal
-            .draw(|frame| draw_cached(frame, app, clock, cache))
+            .draw(|frame| draw_cached_with(frame, app, clock, cache, keys))
             .map_err(|error| io::Error::other(error.to_string()))?;
         self.dirty = false;
         Ok(())

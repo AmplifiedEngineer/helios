@@ -15,7 +15,7 @@ use crate::app::{App, DetailTab, FileRow, ListView, Screen};
 use crate::sanitize::sanitize;
 use crate::tui::cache::{HighlightBudget, RenderCache};
 use crate::tui::diff::Highlighting;
-use crate::tui::keys::{self, Scope};
+use crate::tui::keys::{self, KeyMap, Scope};
 use crate::tui::layout::{self, Panes, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 use crate::tui::style::Styles;
 use crate::tui::{detail, diff, list};
@@ -61,6 +61,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 /// Draws the app, reusing rendered lines from `cache`.
 pub fn draw_cached(frame: &mut Frame, app: &App, clock: &impl Clock, cache: &RenderCache) {
+    draw_cached_with(frame, app, clock, cache, &KeyMap::default());
+}
+
+/// Draws the app with the footer and help showing the keys in `keys`.
+pub fn draw_cached_with(
+    frame: &mut Frame,
+    app: &App,
+    clock: &impl Clock,
+    cache: &RenderCache,
+    keys: &KeyMap,
+) {
     // Only a diff drawn in this frame can ask for another one.
     cache.clear_pending();
     let budget = HighlightBudget::per_frame();
@@ -71,13 +82,13 @@ pub fn draw_cached(frame: &mut Frame, app: &App, clock: &impl Clock, cache: &Ren
         return;
     }
     let scope = Scope::of(app);
-    let footer_height = keys::footer_height(scope, area.width);
+    let footer_height = keys::footer_height_with(scope, area.width, keys);
     let [body, footer] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(area);
     draw_panes(frame, body, app, clock, cache, &budget);
-    keys::render_footer_for(frame, footer, Some(scope));
+    keys::render_footer_for_with(frame, footer, Some(scope), keys);
     if app.show_help {
-        draw_help(frame, body, scope);
+        draw_help(frame, body, scope, keys);
     }
 }
 
@@ -290,9 +301,9 @@ fn draw_diff(
     }
 }
 
-fn draw_help(frame: &mut Frame, area: Rect, scope: Scope) {
+fn draw_help(frame: &mut Frame, area: Rect, scope: Scope, keys: &KeyMap) {
     let width = HELP_WIDTH.min(area.width);
-    let height = keys::help_height(scope)
+    let height = keys::help_height_with(scope, keys)
         .saturating_add(BORDER_ROWS)
         .min(area.height);
     let popup = Rect {
@@ -305,5 +316,5 @@ fn draw_help(frame: &mut Frame, area: Rect, scope: Scope) {
     let block = Block::bordered().title(HELP_TITLE);
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
-    keys::render_help_for(frame, inner, Some(scope));
+    keys::render_help_for_with(frame, inner, Some(scope), keys);
 }
