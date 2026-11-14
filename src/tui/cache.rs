@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use ratatui::text::Line;
 
 use crate::highlight::{BlockHighlighter, LineRoles, MAX_HIGHLIGHT_LINE};
-use crate::theme::Theme;
+use crate::theme::{ColorDepth, Theme};
 use crate::tui::diff::{CodeLines, MAX_DIFF_LINES};
 
 /// The most rendered items the cache keeps for the selected pull request.
@@ -53,7 +53,7 @@ pub struct RenderCache {
     highlighted: Cell<usize>,
 }
 
-type Key = (String, u64, u16, Theme);
+type Key = (String, u64, u16, (Theme, ColorDepth));
 
 /// A diff file's roles are keyed by its path and the hash of its patch.
 type RoleKey = (String, u64);
@@ -238,10 +238,10 @@ impl RenderCache {
         item: &str,
         content_hash: u64,
         width: u16,
-        theme: Theme,
+        look: (Theme, ColorDepth),
         build: impl FnOnce() -> Vec<Line<'static>>,
     ) -> Vec<Line<'static>> {
-        let key = (item.to_string(), content_hash, width, theme);
+        let key = (item.to_string(), content_hash, width, look);
         {
             let mut state = self.state.borrow_mut();
             if state.pr_key != pr_key {
@@ -280,34 +280,39 @@ mod tests {
 
     use super::*;
 
+    const LOOK: (Theme, ColorDepth) = (Theme::Standard, ColorDepth::TrueColor);
+
     fn fetch(cache: &RenderCache, item: &str, builds: &Cell<u32>) -> Vec<Line<'static>> {
-        cache.lines("pr", item, 1, 80, Theme::Standard, || {
+        cache.lines("pr", item, 1, 80, LOOK, || {
             builds.set(builds.get() + 1);
             vec![Line::from(item.to_string())]
         })
     }
 
     #[test]
-    fn a_changed_theme_builds_again() {
+    fn a_changed_theme_or_depth_builds_again() {
         // Arrange
         let cache = RenderCache::new();
         let builds = Cell::new(0);
-        let build = |theme| {
-            cache.lines("pr", "a", 1, 80, theme, || {
+        let build = |look| {
+            cache.lines("pr", "a", 1, 80, look, || {
                 builds.set(builds.get() + 1);
                 vec![Line::from("a")]
             })
         };
-        build(Theme::Standard);
+        build(LOOK);
 
         // Act
-        build(Theme::Standard);
+        build(LOOK);
         let after_same = builds.get();
-        build(Theme::Dark);
+        build((Theme::Dark, ColorDepth::TrueColor));
+        let after_theme = builds.get();
+        build((Theme::Standard, ColorDepth::Ansi16));
 
         // Assert
-        assert_eq!(after_same, 1, "the same theme stays cached");
-        assert_eq!(builds.get(), 2, "another theme builds again");
+        assert_eq!(after_same, 1, "the same look stays cached");
+        assert_eq!(after_theme, 2, "another theme builds again");
+        assert_eq!(builds.get(), 3, "another color depth builds again");
     }
 
     #[test]

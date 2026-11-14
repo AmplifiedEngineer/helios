@@ -146,6 +146,8 @@ pub struct App {
     /// Whether the help overlay is open.
     pub show_help: bool,
     theme: Theme,
+    /// Set when `NO_COLOR` holds the theme on mono.
+    theme_locked: bool,
     depth: ColorDepth,
     pub view: ListView,
     detail: DetailState,
@@ -291,9 +293,16 @@ impl App {
         self.theme = theme;
     }
 
-    /// Moves to the next theme, and back to the first after the last.
+    /// Holds the theme where it is, as `NO_COLOR` asks.
+    pub fn lock_theme(&mut self) {
+        self.theme_locked = true;
+    }
+
+    /// Moves to the next theme, and back to the first after the last. Does nothing while locked.
     pub fn cycle_theme(&mut self) {
-        self.theme = self.theme.next();
+        if !self.theme_locked {
+            self.theme = self.theme.next();
+        }
     }
 
     pub fn depth(&self) -> ColorDepth {

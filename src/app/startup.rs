@@ -5,7 +5,7 @@
 use super::App;
 use crate::config::{resolve_theme, Config, COLUMN_NAMES};
 use crate::test_files::TestPatterns;
-use crate::theme::{effective_theme, ColorDepth};
+use crate::theme::{effective_theme, no_color, ColorDepth};
 use crate::tui::layout::LayoutSettings;
 
 /// The app as it starts: the settings applied, the theme from the flag, the environment or the file.
@@ -19,6 +19,9 @@ pub fn startup_app(
     app.set_depth(ColorDepth::detect(lookup));
     let theme = resolve_theme(cli_theme, env_theme, &settings.theme.name);
     app.set_theme(effective_theme(theme, lookup));
+    if no_color(lookup) {
+        app.lock_theme();
+    }
     app.set_layout(LayoutSettings::from(&settings.layout));
     app.set_preview_delay_ms(settings.layout.preview_delay_ms);
     app.set_columns(

@@ -51,7 +51,7 @@ impl Theme {
 }
 
 /// How many colors the terminal can show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ColorDepth {
     #[default]
     TrueColor,
@@ -131,8 +131,6 @@ impl Role {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     pub depth: ColorDepth,
-    pub background: Ink,
-    pub foreground: Ink,
     pub title: Ink,
     pub accent: Ink,
     pub selection_fg: Ink,
@@ -224,8 +222,6 @@ const fn code(
 fn standard(depth: ColorDepth) -> Palette {
     Palette {
         depth,
-        background: hex(0x000000),
-        foreground: FOREGROUND_GRAY,
         title: hex(0xeeeeee),
         accent: SKY,
         selection_fg: hex(0xffffff),
@@ -271,8 +267,6 @@ fn spectrum(depth: ColorDepth) -> Palette {
 fn dark(depth: ColorDepth) -> Palette {
     Palette {
         depth,
-        background: Ink::Reset,
-        foreground: Ink::Reset,
         title: Ink::Reset,
         accent: named(NamedColor::Cyan),
         selection_fg: named(NamedColor::White),
@@ -321,8 +315,6 @@ fn light(depth: ColorDepth) -> Palette {
 fn mono(depth: ColorDepth) -> Palette {
     Palette {
         depth,
-        background: Ink::Reset,
-        foreground: Ink::Reset,
         title: Ink::Reset,
         accent: Ink::Reset,
         selection_fg: Ink::Reset,

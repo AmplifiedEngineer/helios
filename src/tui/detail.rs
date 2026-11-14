@@ -19,7 +19,7 @@ use crate::model::{
     PrKey, PrState, ReviewDecision, Shown,
 };
 use crate::remote::Remote;
-use crate::theme::Theme;
+use crate::theme::{ColorDepth, Theme};
 use crate::tui::cache::{HighlightBudget, RenderCache};
 use crate::tui::diff::{count_changes, inline_lines_highlighted, Highlighting};
 use crate::tui::list::{age_since, failure_message};
@@ -57,7 +57,7 @@ struct Bodies<'a> {
     cache: &'a RenderCache,
     pr_key: String,
     width: u16,
-    theme: Theme,
+    look: (Theme, ColorDepth),
     styles: Styles,
 }
 
@@ -73,7 +73,7 @@ impl Bodies<'_> {
             item,
             hasher.finish(),
             width,
-            self.theme,
+            self.look,
             || render_markdown(&from_remote(body), width, &self.styles),
         );
         if indent.is_empty() {
@@ -123,7 +123,7 @@ pub fn render_budgeted(
         cache,
         pr_key: pr_key.clone(),
         width: area.width,
-        theme: app.theme(),
+        look: (app.theme(), app.depth()),
         styles,
     };
     let mut cursor_line = 0;

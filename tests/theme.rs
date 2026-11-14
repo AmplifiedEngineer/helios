@@ -22,8 +22,6 @@ fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> +
 /// Every plain field of a palette, then one ink per role.
 fn all_inks(p: &Palette) -> Vec<Ink> {
     let mut inks = vec![
-        p.background,
-        p.foreground,
         p.title,
         p.accent,
         p.selection_fg,
@@ -90,8 +88,6 @@ fn the_default_palette_pins_the_okabe_ito_values() {
     let p = Palette::of(Theme::Standard, ColorDepth::TrueColor);
 
     // Assert
-    assert_eq!(p.background, rgb(0x000000));
-    assert_eq!(p.foreground, rgb(0xcccccc));
     assert_eq!(p.title, rgb(0xeeeeee));
     assert_eq!(p.accent, rgb(0x56b4e9));
     assert_eq!(p.selection_fg, rgb(0xffffff));
@@ -228,9 +224,7 @@ fn every_role_has_a_color_in_all_five_themes() {
             // Assert
             if theme == Theme::Mono {
                 assert_eq!(ink, Ink::Reset, "mono {role:?}");
-            } else if role == Role::Plain {
-                assert_eq!(ink, p.foreground, "{} plain", theme.name());
-            } else {
+            } else if role != Role::Plain {
                 assert_ne!(ink, Ink::Reset, "{} {role:?}", theme.name());
             }
         }
