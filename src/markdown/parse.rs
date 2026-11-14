@@ -67,6 +67,8 @@ pub(super) struct Builder {
     cut: bool,
     /// Open list, quote and item tags that were flattened into their parent.
     pub(super) flattened: usize,
+    /// Open emphasis, strong and link tags dropped for being past `MAX_NESTING`.
+    pub(super) dropped_inline: usize,
     pub(super) lexer: Lexer,
 }
 
@@ -77,6 +79,7 @@ impl Builder {
             blocks_added: 0,
             cut: false,
             flattened: 0,
+            dropped_inline: 0,
             lexer: Lexer::default(),
         }
     }
@@ -153,6 +156,19 @@ impl Builder {
         self.stack
             .iter()
             .filter(|frame| matches!(frame, Frame::List(_) | Frame::Quote(_)))
+            .count()
+    }
+
+    /// Counts the open emphasis, strong and link frames, the ones that nest inline content.
+    pub(super) fn inline_nesting(&self) -> usize {
+        self.stack
+            .iter()
+            .filter(|frame| {
+                matches!(
+                    frame,
+                    Frame::Emphasis(_) | Frame::Strong(_) | Frame::Link(..)
+                )
+            })
             .count()
     }
 

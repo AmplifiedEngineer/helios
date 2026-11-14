@@ -16,6 +16,12 @@ const ENTITIES: [(&str, &str); 7] = [
     ("&nbsp;", " "),
 ];
 
+/// Longest unfinished tag kept for a later fragment; a longer one is not a tag.
+const MAX_PENDING_TAG_BYTES: usize = 4096;
+
+const COMMENT_OPEN: &str = "<!--";
+const COMMENT_CLOSE: &str = "-->";
+
 /// Elements dropped together with their content.
 const SKIPPED_ELEMENTS: [&str; 2] = ["script", "style"];
 
@@ -61,6 +67,8 @@ pub(super) enum Token {
 pub(super) struct Lexer {
     /// An unfinished `<...` carried over until a later fragment closes it.
     pending: String,
+    /// Bytes of a pending comment already searched for its `-->`.
+    comment_scanned: usize,
     /// The element whose content is being dropped, until its closing tag.
     skipping: Option<&'static str>,
 }
@@ -75,6 +83,7 @@ struct Tag<'a> {
 impl Lexer {
     pub(super) fn feed(&mut self, fragment: &str) -> Vec<Token> {
         let mut tokens = Vec::new();
+        let mut resume = std::mem::take(&mut self.comment_scanned);
         let mut rest = std::mem::take(&mut self.pending);
         rest.push_str(fragment);
         let mut rest = rest.as_str();
@@ -90,7 +99,26 @@ impl Lexer {
                 rest = &from_tag[1..];
                 continue;
             }
-            let Some(end) = tag_end(from_tag) else {
+            if from_tag.starts_with(COMMENT_OPEN) {
+                let scanned = if start == 0 { resume } else { 0 };
+                match comment_end(from_tag, scanned) {
+                    Some(end) => rest = &from_tag[end..],
+                    None => {
+                        // The whole input is at most MAX_BODY_BYTES, which bounds this buffer.
+                        self.pending = from_tag.to_string();
+                        self.comment_scanned = from_tag.len();
+                        return tokens;
+                    }
+                }
+                resume = 0;
+                continue;
+            }
+            let Some(end) = tag_end(tag_window(from_tag)) else {
+                if from_tag.len() > MAX_PENDING_TAG_BYTES {
+                    self.text("<", &mut tokens);
+                    rest = &from_tag[1..];
+                    continue;
+                }
                 self.pending = from_tag.to_string();
                 return tokens;
             };
@@ -208,10 +236,10 @@ impl Builder {
                 self.close_open_item();
                 self.stack.push(Frame::Item(Vec::new()));
             }
-            "em" => self.stack.push(Frame::Emphasis(Vec::new())),
-            "strong" => self.stack.push(Frame::Strong(Vec::new())),
+            "em" => self.open_inline(Frame::Emphasis(Vec::new())),
+            "strong" => self.open_inline(Frame::Strong(Vec::new())),
             "code" => self.stack.push(Frame::InlineCode(String::new())),
-            "a" => self.stack.push(Frame::Link(href, Vec::new())),
+            "a" => self.open_inline(Frame::Link(href, Vec::new())),
             "br" => self.html_text("\n"),
             _ => {}
         }
@@ -243,10 +271,10 @@ impl Builder {
             }
             "pre" => self.close_if(|frame| matches!(frame, Frame::Pre(_))),
             "summary" => self.close_if(|frame| matches!(frame, Frame::Summary(_))),
-            "em" => self.close_if(|frame| matches!(frame, Frame::Emphasis(_))),
-            "strong" => self.close_if(|frame| matches!(frame, Frame::Strong(_))),
+            "em" => self.close_inline(|frame| matches!(frame, Frame::Emphasis(_))),
+            "strong" => self.close_inline(|frame| matches!(frame, Frame::Strong(_))),
             "code" => self.close_if(|frame| matches!(frame, Frame::InlineCode(_))),
-            "a" => self.close_if(|frame| matches!(frame, Frame::Link(..))),
+            "a" => self.close_inline(|frame| matches!(frame, Frame::Link(..))),
             _ => {}
         }
     }
@@ -264,6 +292,24 @@ impl Builder {
             self.flattened += 1;
         } else {
             self.open_block(frame);
+        }
+    }
+
+    /// Opens an inline container, or drops its tag past `MAX_NESTING` and keeps the text.
+    fn open_inline(&mut self, frame: Frame) {
+        if self.inline_nesting() >= MAX_NESTING {
+            self.dropped_inline += 1;
+        } else {
+            self.stack.push(frame);
+        }
+    }
+
+    /// Closes an inline container, or consumes the end tag of a dropped one.
+    fn close_inline(&mut self, matches_top: impl Fn(&Frame) -> bool) {
+        if self.dropped_inline > 0 {
+            self.dropped_inline -= 1;
+        } else {
+            self.close_if(matches_top);
         }
     }
 
@@ -319,6 +365,29 @@ fn heading_level(name: &str) -> Option<u8> {
         .parse::<u8>()
         .ok()
         .filter(|level| HEADING_LEVELS.contains(level))
+}
+
+/// Finds where the comment at the start of `from_tag` ends, searching from `scanned`
+/// bytes in, backed up far enough to catch a `-->` split across fragments.
+fn comment_end(from_tag: &str, scanned: usize) -> Option<usize> {
+    let from = scanned
+        .saturating_sub(COMMENT_CLOSE.len() - 1)
+        .max(COMMENT_OPEN.len());
+    from_tag
+        .as_bytes()
+        .get(from..)?
+        .windows(COMMENT_CLOSE.len())
+        .position(|window| window == COMMENT_CLOSE.as_bytes())
+        .map(|at| from + at + COMMENT_CLOSE.len())
+}
+
+/// Cuts `from_tag` to the largest char boundary within `MAX_PENDING_TAG_BYTES`.
+fn tag_window(from_tag: &str) -> &str {
+    let mut end = from_tag.len().min(MAX_PENDING_TAG_BYTES);
+    while !from_tag.is_char_boundary(end) {
+        end -= 1;
+    }
+    &from_tag[..end]
 }
 
 /// Finds the `>` that ends the tag starting at `from_tag[0]`, skipping quoted values.

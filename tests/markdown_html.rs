@@ -378,3 +378,141 @@ fn nesting_at_the_limit_stays_and_one_deeper_is_flattened() {
     assert_eq!(quote_depth(&flattened), MAX_NESTING);
     assert_eq!(visible_text(&flattened), "deep");
 }
+
+const SMALL_STACK_BYTES: usize = 256 * 1024;
+const DEEP_TAG_COUNT: usize = 60_000;
+
+fn inline_depth(inlines: &[Inline]) -> usize {
+    inlines
+        .iter()
+        .map(|inline| match inline {
+            Inline::Emphasis(inner) | Inline::Strong(inner) => 1 + inline_depth(inner),
+            Inline::Link { content, .. } => 1 + inline_depth(content),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn blocks_inline_depth(blocks: &[Block]) -> usize {
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::Paragraph(inlines)
+            | Block::Heading {
+                content: inlines, ..
+            } => inline_depth(inlines),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Parses `html` on a small stack, then walks and drops the result there too.
+/// Returns the inline depth and the debug form of the blocks, or `None` when the thread overflowed.
+fn parse_on_small_stack(html: String) -> Option<(usize, String)> {
+    std::thread::Builder::new()
+        .stack_size(SMALL_STACK_BYTES)
+        .spawn(move || {
+            let blocks = tokenize(&html);
+            let result = (blocks_inline_depth(&blocks), format!("{blocks:?}"));
+            drop(blocks);
+            result
+        })
+        .ok()?
+        .join()
+        .ok()
+}
+
+#[test]
+fn deeply_nested_inline_tags_stay_bounded() {
+    // Arrange
+    let repeat = |open: &str, close: &str| {
+        format!(
+            "{}x{}",
+            open.repeat(DEEP_TAG_COUNT),
+            close.repeat(DEEP_TAG_COUNT)
+        )
+    };
+    let cases = [
+        repeat("<em>", "</em>"),
+        repeat(r#"<a href="https://x">"#, "</a>"),
+        format!(
+            "{}x{}",
+            "<em><strong><code>".repeat(DEEP_TAG_COUNT / 3),
+            "</code></strong></em>".repeat(DEEP_TAG_COUNT / 3)
+        ),
+    ];
+
+    for html in cases {
+        // Act
+        let result = parse_on_small_stack(html);
+
+        // Assert
+        let (depth, text) = result.expect("the parse overflowed the stack");
+        assert!(text.contains(r#"("x")"#), "the text x was lost");
+        assert!(depth <= MAX_NESTING + 1, "inline depth was {depth}");
+    }
+}
+
+#[test]
+fn a_tag_longer_than_the_cap_is_literal_text() {
+    // Arrange
+    let long_value = "y".repeat(5000);
+    let mut tokenizer = HtmlTokenizer::new();
+
+    // Act
+    tokenizer.feed(r#"<a href="https://x" title=""#);
+    tokenizer.feed(&long_value);
+    tokenizer.feed(r#"">link</a>"#);
+    let blocks = tokenizer.finish();
+
+    // Assert
+    let expected = format!(r#"<a href="https://x" title="{long_value}">link"#);
+    assert_eq!(visible_text(&blocks), expected);
+    assert!(!format!("{blocks:?}").contains("Link"));
+}
+
+const LONG_COMMENT_FRAGMENT_BYTES: usize = 100;
+const LONG_COMMENT_TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn long_comment(body_bytes: usize) -> String {
+    format!(
+        r#"<!-- video-navigator {{ "a": "{}" }} -->"#,
+        "y".repeat(body_bytes)
+    )
+}
+
+#[test]
+fn a_long_comment_across_many_fragments_is_still_a_comment() {
+    // Arrange
+    let html = format!("{}after", long_comment(20_000));
+    let mut tokenizer = HtmlTokenizer::new();
+    let started = std::time::Instant::now();
+
+    // Act
+    for fragment in html.as_bytes().chunks(LONG_COMMENT_FRAGMENT_BYTES) {
+        tokenizer.feed(std::str::from_utf8(fragment).expect("ascii input"));
+    }
+    let blocks = tokenizer.finish();
+    let elapsed = started.elapsed();
+
+    // Assert
+    assert_eq!(blocks, vec![Block::Paragraph(vec![text("after")])]);
+    assert!(
+        elapsed < LONG_COMMENT_TIME_LIMIT,
+        "feeding took {elapsed:?}"
+    );
+}
+
+#[test]
+fn a_long_comment_in_one_fragment_is_dropped() {
+    // Arrange
+    let html = format!("{}after", long_comment(30_000));
+
+    // Act
+    let blocks = tokenize(&html);
+
+    // Assert
+    assert_eq!(blocks, vec![Block::Paragraph(vec![text("after")])]);
+}

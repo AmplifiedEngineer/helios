@@ -361,3 +361,29 @@ fn numeric_references_to_control_characters_never_reach_the_document() {
         );
     }
 }
+
+const UNFINISHED_TAG_TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+const LATER_TAG_PAIRS: usize = 12_000;
+
+#[test]
+fn an_unfinished_tag_does_not_make_later_html_slow() {
+    // Arrange
+    let body = format!(
+        "<div title='\n\n{}",
+        "<strong>a</strong>".repeat(LATER_TAG_PAIRS)
+    );
+    assert!(body.len() < MAX_BODY_BYTES);
+    let started = std::time::Instant::now();
+
+    // Act
+    let document = parse(&body);
+    let elapsed = started.elapsed();
+
+    // Assert
+    assert!(
+        elapsed < UNFINISHED_TAG_TIME_LIMIT,
+        "parse took {elapsed:?}"
+    );
+    let strong_count = format!("{document:?}").matches("Strong(").count();
+    assert_eq!(strong_count, LATER_TAG_PAIRS);
+}
