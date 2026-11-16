@@ -200,6 +200,26 @@ fn a_theme_change_rebuilds_cached_lines() {
 }
 
 #[test]
+fn a_color_depth_change_rebuilds_cached_lines() {
+    // Arrange
+    let mut app = opened(PrState::Open, DetailTab::Overview);
+    let cache = RenderCache::new();
+    draw(&app, &cache);
+    let after_first_draw = cache.builds();
+
+    // Act
+    app.set_depth(ColorDepth::Ansi16);
+    draw(&app, &cache);
+    let after_depth_change = cache.builds();
+    draw(&app, &cache);
+
+    // Assert
+    assert_eq!(after_first_draw, 1);
+    assert_eq!(after_depth_change, 2);
+    assert_eq!(cache.builds(), 2, "a repeat draw at the same depth reuses");
+}
+
+#[test]
 fn status_text_is_never_color_only() {
     // Arrange
     let mut list = listed();

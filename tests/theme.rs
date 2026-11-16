@@ -224,7 +224,13 @@ fn every_role_has_a_color_in_all_five_themes() {
             // Assert
             if theme == Theme::Mono {
                 assert_eq!(ink, Ink::Reset, "mono {role:?}");
-            } else if role != Role::Plain {
+            } else if role == Role::Plain {
+                let expected = match theme {
+                    Theme::Standard | Theme::Spectrum => rgb(0xcccccc),
+                    _ => Ink::Reset,
+                };
+                assert_eq!(ink, expected, "{} plain", theme.name());
+            } else {
                 assert_ne!(ink, Ink::Reset, "{} {role:?}", theme.name());
             }
         }
