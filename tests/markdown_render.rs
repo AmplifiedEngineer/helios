@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use helios::markdown::{Block, Document, Inline, Table};
-use helios::theme::Theme;
+use helios::theme::{ColorDepth, Theme};
 use helios::tui::cache::RenderCache;
 use helios::tui::markdown::{render, CUT_NOTE, MAX_URL_DISPLAY};
 use ratatui::style::Modifier;
@@ -378,8 +378,22 @@ fn the_cache_builds_once_per_item_content_and_width() {
     };
 
     // Act
-    let first = cache.lines("pr-1", "overview", 7, 80, Theme::Standard, build);
-    let again = cache.lines("pr-1", "overview", 7, 80, Theme::Standard, build);
+    let first = cache.lines(
+        "pr-1",
+        "overview",
+        7,
+        80,
+        (Theme::Standard, ColorDepth::TrueColor),
+        build,
+    );
+    let again = cache.lines(
+        "pr-1",
+        "overview",
+        7,
+        80,
+        (Theme::Standard, ColorDepth::TrueColor),
+        build,
+    );
 
     // Assert
     assert_eq!(first.len(), 4);
@@ -387,31 +401,66 @@ fn the_cache_builds_once_per_item_content_and_width() {
     assert_eq!(calls.get(), 1, "same item, content and width builds once");
 
     // Act
-    cache.lines("pr-1", "overview", 8, 80, Theme::Standard, build);
+    cache.lines(
+        "pr-1",
+        "overview",
+        8,
+        80,
+        (Theme::Standard, ColorDepth::TrueColor),
+        build,
+    );
 
     // Assert
     assert_eq!(calls.get(), 2, "a changed content hash builds again");
 
     // Act
-    cache.lines("pr-1", "overview", 8, 60, Theme::Standard, build);
+    cache.lines(
+        "pr-1",
+        "overview",
+        8,
+        60,
+        (Theme::Standard, ColorDepth::TrueColor),
+        build,
+    );
 
     // Assert
     assert_eq!(calls.get(), 3, "a changed width builds again");
 
     // Act
-    cache.lines("pr-1", "overview", 8, 60, Theme::Dark, build);
+    cache.lines(
+        "pr-1",
+        "overview",
+        8,
+        60,
+        (Theme::Dark, ColorDepth::TrueColor),
+        build,
+    );
 
     // Assert
     assert_eq!(calls.get(), 4, "a changed theme builds again");
 
     // Act
-    cache.lines("pr-2", "overview", 8, 60, Theme::Dark, build);
+    cache.lines(
+        "pr-2",
+        "overview",
+        8,
+        60,
+        (Theme::Dark, ColorDepth::TrueColor),
+        build,
+    );
 
     // Assert
     assert_eq!(calls.get(), 5, "a different PR clears the cache and builds");
 
     // Act
-    cache.lines("pr-1", "overview", 8, 60, Theme::Dark, build);
+    cache.lines(
+        "pr-1",
+        "overview",
+        8,
+        60,
+        (Theme::Dark, ColorDepth::TrueColor),
+        build,
+    );
 
     // Assert
     assert_eq!(calls.get(), 6, "the cache holds the selected PR only");

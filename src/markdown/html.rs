@@ -25,7 +25,9 @@ const COMMENT_CLOSE: &str = "-->";
 /// Elements dropped together with their content.
 const SKIPPED_ELEMENTS: [&str; 2] = ["script", "style"];
 
-/// Turns the HTML fragments of one body into blocks, keeping state across fragments.
+/// Turns the HTML fragments of one body into blocks, keeping state across fragments. Public for
+/// the integration tests.
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct HtmlTokenizer {
     builder: Builder,

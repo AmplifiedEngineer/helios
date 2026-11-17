@@ -151,6 +151,32 @@ fn the_theme_name_picks_the_start_theme() {
     assert_eq!(forced_mono.theme(), Theme::Mono);
 }
 
+#[test]
+fn no_color_keeps_the_theme_on_mono_when_t_is_pressed() {
+    // Arrange
+    let no_color = |name: &str| (name == "NO_COLOR").then(|| "1".to_string());
+    let mut app = startup_app(&settings(""), None, None, no_color);
+
+    // Act
+    app.cycle_theme();
+
+    // Assert
+    assert_eq!(app.theme(), Theme::Mono);
+}
+
+#[test]
+fn t_still_cycles_the_theme_without_no_color() {
+    // Arrange
+    let mut app = startup_app(&settings(""), None, None, |_| None);
+    let start = app.theme();
+
+    // Act
+    app.cycle_theme();
+
+    // Assert
+    assert_eq!(app.theme(), start.next());
+}
+
 fn key(number: u64) -> PrKey {
     PrKey {
         host: HOST.into(),

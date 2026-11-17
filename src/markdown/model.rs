@@ -59,12 +59,15 @@ pub struct Table {
 }
 
 impl Document {
-    /// Counts every block, nested ones included.
+    /// Counts every block, nested ones included. Public for the integration tests.
+    #[doc(hidden)]
     pub fn block_count(&self) -> usize {
         count(&self.blocks)
     }
 
-    /// Returns how deeply lists and quotes nest, 0 when there are none.
+    /// Returns how deeply lists and quotes nest, 0 when there are none. Public for the
+    /// integration tests.
+    #[doc(hidden)]
     pub fn nesting_depth(&self) -> usize {
         depth(&self.blocks)
     }
