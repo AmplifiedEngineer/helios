@@ -2,16 +2,16 @@
 
 # helios
 
-helios is planned as a terminal UI. It will list your own pull requests and the pull requests that need you. It will work across GitHub accounts and hosts. In release 1 it will be read-only: it will never write to GitHub. See Status for what works today.
+helios is a terminal UI. It lists your own pull requests and the pull requests that need you, across GitHub accounts and hosts. It is read-only: it never writes to GitHub. See Status for what works today.
 
 ## Status
 
-Release 1 is in progress. It is not released yet. The terminal UI works: it lists your pull requests and the ones that need you from every `gh` account, opens a pull request with its tabs, files and diffs, and refreshes every 120 seconds. `--smoke` queries your accounts and prints the counts. helios never writes to GitHub.
+Release 1 is in progress. It is not released yet. The terminal UI works: it lists your pull requests and the ones that need you from every `gh` account, opens a pull request with its tabs, files and diffs, and refreshes every 120 seconds by default. `--smoke` queries your accounts and prints the counts. helios never writes to GitHub.
 
 ## Requirements
 
 - The GitHub CLI, `gh`, installed and logged in.
-- helios will take its accounts from `gh`. It will have no login of its own.
+- helios takes its accounts from `gh`. It has no login of its own.
 
 ## Usage
 
@@ -24,7 +24,7 @@ helios [options]
 | Flag | Meaning |
 |------|---------|
 | `--hosts <hosts>` | Comma-separated hosts to include. `--smoke` honours it. Env: `HELIOS_HOSTS`. |
-| `--refresh-secs <secs>` | Refresh interval, 30 to 3600 seconds. The value is checked; nothing uses it yet. Env: `HELIOS_REFRESH_SECS`. |
+| `--refresh-secs <secs>` | Refresh interval, 30 to 3600 seconds. Default: 120. Env: `HELIOS_REFRESH_SECS`. |
 | `--theme <name>` | Start theme: `default`, `spectrum`, `dark`, `light` or `mono`. Beats the `[theme]` section of the config file. Env: `HELIOS_THEME`. |
 | `--drafts` | Count draft pull requests. `--smoke` honours it. |
 | `--smoke` | Query every account once, print the Mine and Needs me counts, and exit. It does not start the UI. Exit code 1 when there are no accounts or no host answers. |
