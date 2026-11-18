@@ -6,7 +6,17 @@ helios is a terminal UI. It lists your own pull requests and the pull requests t
 
 ## Status
 
-Release 1 is in progress. It is not released yet. The terminal UI works: it lists your pull requests and the ones that need you from every `gh` account, opens a pull request with its tabs, files and diffs, and refreshes every 120 seconds by default. `--smoke` queries your accounts and prints the counts. helios never writes to GitHub.
+Version 0.1.0 is released. The terminal UI works: it lists your pull requests and the ones that need you from every `gh` account, opens a pull request with its tabs, files and diffs, and refreshes every 120 seconds by default. `--smoke` queries your accounts and prints the counts. helios never writes to GitHub.
+
+## Install
+
+With Homebrew:
+
+```
+brew install amplifiedengineer/tap/helios
+```
+
+Or download an archive for macOS or Linux (x86_64 or arm64) from the [releases page](https://github.com/amplifiedengineer/helios/releases). Check it against `SHA256SUMS`, unpack it and put `helios` on your `PATH`.
 
 ## Requirements
 
